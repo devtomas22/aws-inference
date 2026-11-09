@@ -309,7 +309,11 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
     chunk({ role: 'assistant', content: '' });
     let toolIdx = -1;
     let stopReason = 'end_turn';
-    for await (const ev of streamResp.eventStream ?? streamResp.body ?? []) {
+    // ConverseStreamOutput exposes the event stream as `stream` (SDK >=3.7xx);
+    // `eventStream`/`body` are legacy aliases that may be undefined
+    const events = (streamResp && (streamResp.stream ?? streamResp.eventStream ?? streamResp.body)) ?? [];
+    if (!events?.[Symbol.asyncIterator]) throw new Error('no event stream in ConverseStream response (keys: ' + Object.keys(streamResp || {}).join(',') + ')');
+    for await (const ev of events) {
       if (clientGone) break;
       if (ev.messageStart) { continue; }
       if (ev.contentBlockStart) {
