@@ -25,7 +25,11 @@ Parameters:
   SgId:
     Type: AWS::EC2::SecurityGroup::Id
     Description: Security group created OUTSIDE CloudFormation by scripts/deploy.sh (some backends
-      flip-fail on SecurityGroup template bodies). Must allow all egress, no ingress.
+      flip-fail on SecurityGroup template bodies). Must allow all egress, no inbound.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet of the dedicated VPC created by scripts/deploy.sh (this account has
+      no default VPC; the only other VPC is private)
   LatestAmi:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -86,6 +90,7 @@ Resources:
     Properties:
       ImageId: !Ref LatestAmi
       InstanceType: !Ref InstanceType
+      SubnetId: !Ref SubnetId
       IamInstanceProfile: !Ref InstanceProfile
       SecurityGroupIds: [!Ref SgId]
       KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']

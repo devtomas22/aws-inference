@@ -23,16 +23,53 @@ BASE="${BASE:-}"
 
 echo "== [1/4] cloudformation deploy  stack=$STACK  profile=$PROFILE  region=$REGION  type=$INSTANCE_TYPE =="
 
+# Public network OUTSIDE CloudFormation: this account has NO default VPC and the only
+# other VPC is private (no IGW route). Build/find a dedicated public VPC via EC2 API.
+NET_NAME="aws-inference-${STACK}-net"
+AZ="${REGION}a"
+VPC_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-vpcs \
+  --filters Name=tag:Name,Values="$NET_NAME" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
+if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+  echo "  creating public network $NET_NAME via EC2 API…"
+  VPC_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-vpc \
+    --cidr-block 10.42.0.0/16 --output text --query Vpc.VpcId)
+  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$VPC_ID" \
+    --tags Key=Name,Value="$NET_NAME" Key=project,Value=aws-inference
+  SUBNET_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-subnet \
+    --vpc-id "$VPC_ID" --cidr-block 10.42.1.0/24 --availability-zone "$AZ" \
+    --output text --query Subnet.SubnetId)
+  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$SUBNET_ID" \
+    --tags Key=Name,Value="$NET_NAME-subnet" Key=project,Value=aws-inference
+  IGW_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-internet-gateway \
+    --output text --query InternetGateway.InternetGatewayId)
+  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$IGW_ID" \
+    --tags Key=Name,Value="$NET_NAME-igw" Key=project,Value=aws-inference
+  aws --profile "$PROFILE" --region "$REGION" ec2 attach-internet-gateway \
+    --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
+  aws --profile "$PROFILE" --region "$REGION" ec2 modify-subnet-attribute \
+    --subnet-id "$SUBNET_ID" --map-public-ip-on-launch
+  RTB_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-route-table \
+    --vpc-id "$VPC_ID" --output text --query RouteTable.RouteTableId)
+  aws --profile "$PROFILE" --region "$REGION" ec2 create-route \
+    --route-table-id "$RTB_ID" --destination-cidr-block 0.0.0.0/0 --gateway-id "$IGW_ID"
+  aws --profile "$PROFILE" --region "$REGION" ec2 associate-route-table \
+    --route-table-id "$RTB_ID" --subnet-id "$SUBNET_ID" >/dev/null
+else
+  SUBNET_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-subnets \
+    --filters Name=vpc-id,Values="$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
+fi
+echo "  vpc: $VPC_ID  subnet: $SUBNET_ID"
+
 # Security group OUTSIDE CloudFormation: a handful of backends flip-fail validation on
 # SecurityGroup template bodies; the plain EC2 API is deterministic. All-egress, no ingress.
 SG_NAME="aws-inference-${STACK}-sg"
 SG_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-security-groups \
-  --filters Name=group-name,Values="$SG_NAME" \
+  --filters Name=group-name,Values="$SG_NAME" Name=vpc-id,Values="$VPC_ID" \
   --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
 if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
   echo "  creating security group $SG_NAME via EC2 API…"
   SG_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-security-group \
-    --group-name "$SG_NAME" \
+    --group-name "$SG_NAME" --vpc-id "$VPC_ID" \
     --description "aws-inference: egress only, no inbound (access via Cloudflare Tunnel + SSM)" \
     --output text --query GroupId)
   aws --profile "$PROFILE" --region "$REGION" ec2 authorize-security-group-egress \
@@ -59,7 +96,7 @@ for ATTEMPT in 1 2 3 4 5 6; do
     --template-file cloudformation/template.yaml \
     --stack-name "$STACK" \
     --capabilities CAPABILITY_IAM \
-    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN" SgId="$SG_ID"; then
+    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN" SgId="$SG_ID" SubnetId="$SUBNET_ID"; then
     DEPLOY_OK=1; break
   fi
   echo "  deploy attempt $ATTEMPT/6 failed — waiting 30s before retry…"
@@ -85,6 +122,7 @@ done
                    ParameterKey=RepoUrl,ParameterValue="$REPO_URL" \
                    ParameterKey=TunnelToken,ParameterValue="$TUNNEL_TOKEN" \
                    ParameterKey=SgId,ParameterValue="$SG_ID" \
+                   ParameterKey=SubnetId,ParameterValue="$SUBNET_ID" \
                    ParameterKey=KeyName,ParameterValue="" >/dev/null
     aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" \
       && DEPLOY_OK=1
