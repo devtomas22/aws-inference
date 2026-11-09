@@ -21,10 +21,11 @@ you ──HTTPS──> trycloudflare.com tunnel ──> cloudflared (EC2, egress
 
 ## What gets deployed (CloudFormation: `cloudformation/template.yaml`)
 
-- EC2 AL2023 instance (default `t3.micro` — fits free-tier/lab accounts where only
-  free-tier instance classes are allowed; pass `INSTANCE_TYPE=t3.small` if your
-  account permits it) + IAM role (bedrock invoke/list, SSM param publish, SSM access)
-- Security group with **no ingress rules at all** (egress only)
+- EC2 AL2023 instance (default `t3.micro`, deploy override `INSTANCE_TYPE=m5.large`
+  in `scripts/.env`) + IAM role (bedrock invoke/list, SSM param publish, SSM access)
+- Security group with **no ingress rules at all** (egress only) — created OUTSIDE
+  CloudFormation by `deploy.sh` (plain EC2 API) and passed as the `SgId` parameter,
+  because some backends flip-fail `SecurityGroup` template bodies
 - user-data → `ec2/bootstrap.sh`, which installs:
   - **Node 22** (official tarball) + gateway deps (`npm install`)
   - **cloudflared** (quick tunnel by default; named tunnel if you pass `TunnelToken`)

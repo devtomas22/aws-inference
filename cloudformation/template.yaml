@@ -22,6 +22,10 @@ Parameters:
     NoEcho: true
     Default: ''
     Description: Optional Cloudflare named-tunnel token. Empty = quick trycloudflare.com tunnel.
+  SgId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group created OUTSIDE CloudFormation by scripts/deploy.sh (some backends
+      flip-fail on SecurityGroup template bodies). Must allow all egress, no ingress.
   LatestAmi:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -73,12 +77,9 @@ Resources:
     Type: AWS::IAM::InstanceProfile
     Properties: { Roles: [!Ref InstanceRole] }
 
-  SecurityGroup:
-    Type: AWS::SecurityGroup
-    Properties:
-      GroupDescription: aws-inference - egress only, no inbound rules (all access via Cloudflare Tunnel + SSM)
-      # SecurityGroupEgress omitted on purpose: CFN then creates the default all-egress
-      # rule; no ingress rules are ever specified, and Cloudflared/SSM dial out.
+  # NOTE: the security group is intentionally NOT a resource here. Some backends
+  # flip-fail on SecurityGroup template bodies; scripts/deploy.sh creates it via the
+  # plain EC2 API and passes its ID as the SgId parameter (all-egress, no ingress).
 
   Instance:
     Type: AWS::EC2::Instance
@@ -86,7 +87,7 @@ Resources:
       ImageId: !Ref LatestAmi
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
-      SecurityGroupIds: [!Ref SecurityGroup]
+      SecurityGroupIds: [!Ref SgId]
       KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
       BlockDeviceMappings:
         - DeviceName: /dev/xvda

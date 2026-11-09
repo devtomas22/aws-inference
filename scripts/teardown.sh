@@ -19,4 +19,9 @@ echo "deleting stack (wait ~2 min)…"
 aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" || true
 aws --profile "$PROFILE" --region "$REGION" ssm delete-parameters --names \
   "/inf-gw/$STACK/api-key" "/inf-gw/$STACK/tunnel-url" >/dev/null 2>&1 || true
-echo "stack + SSM params deleted. EC2 terminated, no lingering cost."
+SG_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-security-groups \
+  --filters Name=group-name,Values="aws-inference-$STACK-sg" \
+  --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
+[ -n "$SG_ID" ] && [ "$SG_ID" != "None" ] && \
+  aws --profile "$PROFILE" --region "$REGION" ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null || true
+echo "stack + SSM params + security group deleted. EC2 terminated, no lingering cost."

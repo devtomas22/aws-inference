@@ -23,6 +23,25 @@ BASE="${BASE:-}"
 
 echo "== [1/4] cloudformation deploy  stack=$STACK  profile=$PROFILE  region=$REGION  type=$INSTANCE_TYPE =="
 
+# Security group OUTSIDE CloudFormation: a handful of backends flip-fail validation on
+# SecurityGroup template bodies; the plain EC2 API is deterministic. All-egress, no ingress.
+SG_NAME="aws-inference-${STACK}-sg"
+SG_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-security-groups \
+  --filters Name=group-name,Values="$SG_NAME" \
+  --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
+if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+  echo "  creating security group $SG_NAME via EC2 API…"
+  SG_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-security-group \
+    --group-name "$SG_NAME" \
+    --description "aws-inference: egress only, no inbound (access via Cloudflare Tunnel + SSM)" \
+    --output text --query GroupId)
+  aws --profile "$PROFILE" --region "$REGION" ec2 authorize-security-group-egress \
+    --group-id "$SG_ID" --ip-permissions '[{"IpProtocol":"-1"}]'
+  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$SG_ID" \
+    --tags Key=project,Value=aws-inference Key=Name,Value="$SG_NAME"
+fi
+echo "  security group: $SG_ID"
+
 # Some restricted/lab CFN backends reject template type-list scans intermittently
 # (minutes-scale windows). Cheap probe: wait for a green validate-template, then create.
 for i in $(seq 1 15); do
@@ -40,7 +59,7 @@ for ATTEMPT in 1 2 3 4 5 6; do
     --template-file cloudformation/template.yaml \
     --stack-name "$STACK" \
     --capabilities CAPABILITY_IAM \
-    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN"; then
+    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN" SgId="$SG_ID"; then
     DEPLOY_OK=1; break
   fi
   echo "  deploy attempt $ATTEMPT/6 failed — waiting 30s before retry…"
@@ -65,6 +84,7 @@ done
       --parameters ParameterKey=InstanceType,ParameterValue="$INSTANCE_TYPE" \
                    ParameterKey=RepoUrl,ParameterValue="$REPO_URL" \
                    ParameterKey=TunnelToken,ParameterValue="$TUNNEL_TOKEN" \
+                   ParameterKey=SgId,ParameterValue="$SG_ID" \
                    ParameterKey=KeyName,ParameterValue="" >/dev/null
     aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" \
       && DEPLOY_OK=1
