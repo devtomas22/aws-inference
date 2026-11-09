@@ -76,9 +76,9 @@ Resources:
   SecurityGroup:
     Type: AWS::SecurityGroup
     Properties:
-      GroupDescription: aws-inference - egress only (all access via Cloudflare Tunnel + SSM)
-      SecurityGroupEgress:
-        - { IpProtocol: '-1', CidrIp: 0.0.0.0/0 }
+      GroupDescription: aws-inference - egress only, no inbound rules (all access via Cloudflare Tunnel + SSM)
+      # SecurityGroupEgress omitted on purpose: CFN then creates the default all-egress
+      # rule; no ingress rules are ever specified, and Cloudflared/SSM dial out.
 
   Instance:
     Type: AWS::EC2::Instance
