@@ -48,9 +48,17 @@ Resources:
           - Effect: Allow
             Principal: { Service: ec2.amazonaws.com }
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonSSMManagedInstanceCore
+      # Lab accounts can disallow attaching AWS managed policies (404 "not attachable")
+      # -> inline the SSM-agent permissions instead of AmazonSSMManagedInstanceCore.
       Policies:
+        - PolicyName: ssm-agent-core
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SsmAgent
+                Effect: Allow
+                Action: ssm:*
+                Resource: '*'
         - PolicyName: bedrock-and-params
           PolicyDocument:
             Version: '2012-10-17'
