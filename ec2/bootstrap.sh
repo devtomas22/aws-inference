@@ -88,6 +88,8 @@ if [ ! -x /usr/local/bin/cloudflared ]; then
 fi
 
 # --- hermes agent (python-based installer; non-fatal if it fails)
+# cloud-init runs user-data with an empty env — the installer reads $HOME under set -u
+export HOME="${HOME:-/root}"
 if ! command -v hermes >/dev/null 2>&1; then
   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive || \
     echo "WARN: hermes installer failed — the gateway itself is unaffected"

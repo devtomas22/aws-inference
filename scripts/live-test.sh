@@ -45,13 +45,13 @@ echo "  assistant: $CONTENT"
 echo "  raw: $(echo "$RESP" | head -c 400)"
 
 echo "-- 6. streaming SSE --"
-CH=$(curl -sN -X POST "$BASE/v1/chat/completions" \
+CH=$(curl -sN -m 90 -X POST "$BASE/v1/chat/completions" \
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d "{\"model\":\"$DMODEL\",\"stream\":true,\"max_tokens\":60,\"messages\":[{\"role\":\"user\",\"content\":\"Count from 1 to 5, digits separated by commas.\"}]}" \
   | grep -c '^data:' || true)
 [ "${CH:-0}" -gt 0 ] && t "sse chunks received" 1 1 || t "sse chunks received" 1 0
 echo "  chunks: $CH"
-curl -sN -X POST "$BASE/v1/chat/completions" \
+curl -sN -m 90 -X POST "$BASE/v1/chat/completions" \
   -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
   -d "{\"model\":\"$DMODEL\",\"stream\":true,\"max_tokens\":40,\"messages\":[{\"role\":\"user\",\"content\":\"Say READY in one word\"}]}" \
   | head -6 | sed 's/^/  SSE> /'

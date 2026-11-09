@@ -1,9 +1,9 @@
 {
-  "default": "anthropic.claude-haiku-4-5-20251001-v1:0",
+  "default": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   "map": {
-    "haiku": "anthropic.claude-haiku-4-5-20251001-v1:0",
-    "sonnet": "anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "opus": "anthropic.claude-opus-4-5-20251101-v1:0",
+    "haiku": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "sonnet": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "opus": "us.anthropic.claude-opus-4-5-20251101-v1:0",
     "glm": "zai.glm-5.3",
     "glm-fast": "zai.glm-4.7-flash",
     "nova": "amazon.nova-lite-v1:0",
@@ -13,9 +13,9 @@
     "gpt-oss": "openai.gpt-oss-120b-1:0"
   },
   "suggested": [
-    "anthropic.claude-haiku-4-5-20251001-v1:0",
-    "anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "anthropic.claude-opus-4-5-20251101-v1:0",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "us.anthropic.claude-opus-4-5-20251101-v1:0",
     "zai.glm-5.3",
     "zai.glm-4.7-flash",
     "amazon.nova-lite-v1:0",
