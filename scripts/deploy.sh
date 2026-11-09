@@ -5,6 +5,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export AWS_PAGER=""
 
+# scripts/.env supplies defaults; CLI/env values win.
+REPO_ROOT="$(pwd)"
+while IFS='=' read -r K V; do
+  case "$K" in ''|\#*) continue ;; esac
+  [ -z "${!K:-}" ] && export "$K=$V"
+done < "$REPO_ROOT/scripts/.env"
+
 PROFILE="${PROFILE:-sandbox}"
 STACK="${STACK:-aws-inference}"
 REGION="${REGION:-$(aws configure get region --profile "$PROFILE" 2>/dev/null || true)}"

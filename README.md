@@ -1,9 +1,12 @@
 # aws-inference
 
-OpenAI / Hermes-Agent-compatible API gateway for **AWS Bedrock**, one-command deployable
-(**pinned to us-east-1**):
+OpenAI / Hermes-Agent-compatible API gateway for **AWS Bedrock**, one-command deployable:
 
     PROFILE=sandbox bash scripts/deploy.sh
+
+The template is region-agnostic; the deployed region/profile defaults live in
+`scripts/.env` (`REGION=us-east-1`, `PROFILE=sandbox`) — edit it or override on
+the CLI (`REGION=eu-west-1 PROFILE=sandbox bash scripts/deploy.sh`).
 
 End result: a **public HTTPS URL + password** you can point any OpenAI client, or a
 Hermes Agent, at. Runs on a single EC2 instance with **zero inbound ports** — all
