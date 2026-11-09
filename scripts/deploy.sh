@@ -15,8 +15,20 @@ TUNNEL_TOKEN="${TUNNEL_TOKEN:-}"
 BASE="${BASE:-}"
 
 echo "== [1/4] cloudformation deploy  stack=$STACK  profile=$PROFILE  region=$REGION  type=$INSTANCE_TYPE =="
+
+# Some restricted/lab CFN backends reject template type-list scans intermittently
+# (minutes-scale windows). Cheap probe: wait for a green validate-template, then create.
+for i in $(seq 1 15); do
+  if aws --profile "$PROFILE" --region "$REGION" cloudformation validate-template \
+       --template-body file://cloudformation/template.yaml >/dev/null 2>&1; then
+    echo "  validate-template green (attempt $i)"; break
+  fi
+  echo "  validate-template rejected (attempt $i/15) — waiting 20s for the validation window…"
+  sleep 20
+done
+
 DEPLOY_OK=0
-for ATTEMPT in 1 2 3 4; do
+for ATTEMPT in 1 2 3 4 5 6; do
   if aws --profile "$PROFILE" --region "$REGION" cloudformation deploy \
     --template-file cloudformation/template.yaml \
     --stack-name "$STACK" \
@@ -24,12 +36,12 @@ for ATTEMPT in 1 2 3 4; do
     --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN"; then
     DEPLOY_OK=1; break
   fi
-  echo "  deploy attempt $ATTEMPT/4 failed — retrying in 15s (some backends reject fresh change sets intermittently)…"
-  # an intermittently rejected change set may have created a rollback-in-progress stack; wait for it to settle
+  echo "  deploy attempt $ATTEMPT/6 failed — waiting 30s before retry…"
+  # a rejected change set can leave a rollback-in-progress stack; wait for it to settle
   aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" 2>/dev/null || \
   aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-rollback-complete --stack-name "$STACK" 2>/dev/null || true
   aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" 2>/dev/null || true
-  sleep 15
+  sleep 30
 done
 [ "$DEPLOY_OK" = 1 ] || { echo "create failed after retries — check: aws cloudformation describe-stack-events --stack-name $STACK | tail -20"; exit 1; }
 
