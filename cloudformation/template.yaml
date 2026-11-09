@@ -68,9 +68,9 @@ Resources:
                 Action:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
-                Resource:
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/*'
-                  - !Sub 'arn:aws:bedrock:${AWS::Region}:*:inference-profile/*'
+                # us.* cross-region inference profiles resolve to foundation models
+                # in OTHER regions — resource must not be region-locked
+                Resource: '*'
               - Sid: BedrockList
                 Effect: Allow
                 Action:
