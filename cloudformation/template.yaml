@@ -67,7 +67,7 @@ Resources:
                   - ssm:PutParameter
                   - ssm:GetParameter
                   - ssm:AddTagsToResource
-                Resource: !Sub 'arn:aws:ssm:*:*:parameter/aws-inference-${AWS::StackName}*'
+                Resource: !Sub 'arn:aws:ssm:*:*:parameter/inf-gw/${AWS::StackName}*'
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile

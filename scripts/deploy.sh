@@ -43,6 +43,26 @@ for ATTEMPT in 1 2 3 4 5 6; do
   aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" 2>/dev/null || true
   sleep 30
 done
+[ "$DEPLOY_OK" = 1 ] || {
+  # Fallback: direct create-stack bypasses the change-set path some backends reject.
+  echo "  change-set path kept failing — trying direct create-stack fallback…"
+  ST=$(aws --profile "$PROFILE" --region "$REGION" cloudformation describe-stacks --stack-name "$STACK" \
+       --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo none)
+  echo "  existing stack status: $ST"
+  if ! grep -qE '_IN_PROGRESS|CREATE_COMPLETE|UPDATE_COMPLETE' <<<"$ST"; then
+    aws --profile "$PROFILE" --region "$REGION" cloudformation delete-stack --stack-name "$STACK" 2>/dev/null || true
+    aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" 2>/dev/null || true
+    aws --profile "$PROFILE" --region "$REGION" cloudformation create-stack \
+      --stack-name "$STACK" --capabilities CAPABILITY_IAM \
+      --template-body file://cloudformation/template.yaml \
+      --parameters ParameterKey=InstanceType,ParameterValue="$INSTANCE_TYPE" \
+                   ParameterKey=RepoUrl,ParameterValue="$REPO_URL" \
+                   ParameterKey=TunnelToken,ParameterValue="$TUNNEL_TOKEN" \
+                   ParameterKey=KeyName,ParameterValue="" >/dev/null
+    aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" \
+      && DEPLOY_OK=1
+  fi
+}
 [ "$DEPLOY_OK" = 1 ] || { echo "create failed after retries — check: aws cloudformation describe-stack-events --stack-name $STACK | tail -20"; exit 1; }
 
 STACK_JSON=$(aws --profile "$PROFILE" --region "$REGION" cloudformation describe-stacks --stack-name "$STACK" \
@@ -51,7 +71,7 @@ echo "$STACK_JSON"
 INSTANCE_ID=$(echo "$STACK_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin)["Outputs"]; print([o["OutputValue"] for o in d if o["OutputKey"]=="InstanceId"][0])')
 PUBLIC_IP=$(echo "$STACK_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin)["Outputs"]; print([o["OutputValue"] for o in d if o["OutputKey"]=="PublicIP"][0])')
 
-PREFIX="/aws-inference/$STACK"
+PREFIX="/inf-gw/$STACK"
 if [ -z "$BASE" ]; then
   echo "== [2/4] waiting for EC2 bootstrap + quick tunnel (SSM $PREFIX/tunnel-url) =="
   URL=""

@@ -44,7 +44,8 @@ API_KEY="$(grep -E '^API_KEY=' "$REPO/.env" | cut -d= -f2)"
 DEFAULT_MODEL="$(node -e 'console.log(require("./models.json").default)')"
 
 # --- publish secrets/URL to SSM Parameter Store (deploy script reads these)
-aws --region "$REGION" ssm put-parameter --name "/aws-inference/$STACK_NAME/api-key" \
+# NOTE: parameter names under /aws/... are reserved on some accounts -> use /inf-gw/
+aws --region "$REGION" ssm put-parameter --name "/inf-gw/$STACK_NAME/api-key" \
     --type SecureString --value "$API_KEY" --overwrite >/dev/null
 
 cat > "$ENVF" <<EOF

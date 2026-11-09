@@ -10,5 +10,5 @@ aws --profile "$PROFILE" --region "$REGION" cloudformation delete-stack --stack-
 echo "deleting stack (wait ~2 min)…"
 aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" || true
 aws --profile "$PROFILE" --region "$REGION" ssm delete-parameters --names \
-  "/aws-inference/$STACK/api-key" "/aws-inference/$STACK/tunnel-url" >/dev/null 2>&1 || true
+  "/inf-gw/$STACK/api-key" "/inf-gw/$STACK/tunnel-url" >/dev/null 2>&1 || true
 echo "stack + SSM params deleted. EC2 terminated, no lingering cost."

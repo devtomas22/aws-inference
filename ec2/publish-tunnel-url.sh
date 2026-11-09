@@ -29,6 +29,6 @@ fi
 
 echo "$URL" > /opt/aws-inference/TUNNEL_URL
 chmod 644 /opt/aws-inference/TUNNEL_URL
-aws --region "$REGION" ssm put-parameter --name "/aws-inference/$STACK_NAME/tunnel-url" \
+aws --region "$REGION" ssm put-parameter --name "/inf-gw/$STACK_NAME/tunnel-url" \
     --type String --value "$URL" --overwrite >/dev/null
 echo "published $URL"

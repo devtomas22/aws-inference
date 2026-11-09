@@ -29,7 +29,8 @@ you ──HTTPS──> trycloudflare.com tunnel ──> cloudflared (EC2, egress
   - systemd units: `aws-inference` (gateway), `aws-inference-tunnel` (cloudflared),
     `aws-inference-publish` (publishes tunnel URL → SSM)
 - The random API key + tunnel URL are written to SSM Parameter Store
-  `/aws-inference/<stack>/{api-key,tunnel-url}` at boot; `deploy.sh` fetches them
+  `/inf-gw/<stack>/{api-key,tunnel-url}` at boot (`/aws/...` prefixes are reserved
+  on some accounts); `deploy.sh` fetches them
   and prints the URL + password. Nothing to type, nothing to SSH for.
 
 ## Endpoints
