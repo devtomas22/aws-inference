@@ -30,6 +30,11 @@ Parameters:
     Type: AWS::EC2::Subnet::Id
     Description: Public subnet of the dedicated VPC created by scripts/deploy.sh (this account has
       no default VPC; the only other VPC is private)
+  DeployTag:
+    Type: String
+    Default: ''
+    Description: Repo short-SHA from scripts/deploy.sh — a changed tag replaces the instance so
+      new bootstrap/server code lands; unchanged tag keeps the running instance.
   LatestAmi:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -111,6 +116,7 @@ Resources:
       Tags:
         - { Key: Name, Value: !Sub "${AWS::StackName}-inference" }
         - { Key: project, Value: aws-inference }
+        - { Key: deploy-tag, Value: !Ref DeployTag }
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe

@@ -21,6 +21,9 @@ REPO_URL="${REPO_URL:-https://github.com/devtomas22/aws-inference.git}"
 TUNNEL_TOKEN="${TUNNEL_TOKEN:-}"
 BASE="${BASE:-}"
 
+DEPLOY_TAG=$(git -C "$(pwd)" rev-parse --short HEAD 2>/dev/null || echo manual)
+echo "  deploy-tag: $DEPLOY_TAG"
+
 echo "== [1/4] cloudformation deploy  stack=$STACK  profile=$PROFILE  region=$REGION  type=$INSTANCE_TYPE =="
 
 # Public network OUTSIDE CloudFormation: this account has NO default VPC and the only
@@ -97,7 +100,7 @@ for ATTEMPT in 1 2 3 4 5 6; do
     --template-file cloudformation/template.yaml \
     --stack-name "$STACK" \
     --capabilities CAPABILITY_IAM \
-    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN" SgId="$SG_ID" SubnetId="$SUBNET_ID"; then
+    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN" SgId="$SG_ID" SubnetId="$SUBNET_ID" DeployTag="$DEPLOY_TAG"; then
     DEPLOY_OK=1; break
   fi
   echo "  deploy attempt $ATTEMPT/6 failed — waiting 30s before retry…"
@@ -132,6 +135,7 @@ done
                    ParameterKey=TunnelToken,ParameterValue="$TUNNEL_TOKEN" \
                    ParameterKey=SgId,ParameterValue="$SG_ID" \
                    ParameterKey=SubnetId,ParameterValue="$SUBNET_ID" \
+                   ParameterKey=DeployTag,ParameterValue="$DEPLOY_TAG" \
                    ParameterKey=KeyName,ParameterValue="" >/dev/null
     aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" \
       && DEPLOY_OK=1
@@ -162,20 +166,28 @@ else
   URL="$BASE"
 fi
 
-echo "== [3/4] fetching API key + hermes dashboard URL from SSM =="
-KEY=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/api-key" \
-      --with-decryption --query 'Parameter.Value' --output text)
-
 if [[ "$URL" == https://* ]]; then
-  echo "  waiting for hermes dashboard tunnel (SSM $PREFIX/hermes-url)…"
+  OLD_LAUNCH=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[].Instances[0].LaunchTime' --output text 2>/dev/null || true)
+  OLD_HURL=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/hermes-url" \
+    --query 'Parameter.Value' --output text 2>/dev/null || true)
+  echo "== [3/4] fetching API key + hermes dashboard URL from SSM =="
+  KEY=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/api-key" \
+        --with-decryption --query 'Parameter.Value' --output text)
+
   HERMES_URL=""
-  for i in $(seq 1 40); do
-    HERMES_URL=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/hermes-url" \
-          --query 'Parameter.Value' --output text 2>/dev/null || true)
-    if [[ "$HERMES_URL" == https://* ]]; then break; fi
-    sleep 10
-  done
-  [[ "$HERMES_URL" == https://* ]] || { echo "hermes dashboard URL never published (gateway URL still live)"; HERMES_URL=""; }
+  NEW_LAUNCH=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+    --query 'Reservations[].Instances[0].LaunchTime' --output text 2>/dev/null || true)
+  if [ "$HERMES_DASH_SKIP" != 1 ] && { [ "$OLD_LAUNCH" != "$NEW_LAUNCH" ] || [ -n "$OLD_HURL" ]; }; then
+    echo "  waiting for hermes dashboard tunnel (SSM $PREFIX/hermes-url)…"
+    for i in $(seq 1 40); do
+      HERMES_URL=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/hermes-url" \
+            --query 'Parameter.Value' --output text 2>/dev/null || true)
+      if [[ "$HERMES_URL" == https://* ]]; then break; fi
+      sleep 10
+    done
+  fi
+  [[ "$HERMES_URL" == https://* ]] || { echo "  hermes dashboard URL not published (gateway URL still live)"; HERMES_URL=""; }
   echo "  hermes: $HERMES_URL"
 else
   HERMES_URL="token-managed"
