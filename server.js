@@ -4,6 +4,8 @@
 import express from 'express';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -45,7 +47,9 @@ const CONFIG = {
   port: parseInt(process.env.PORT || '3000', 10),
   apiKey: process.env.API_KEY,
   region: process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1',
-  defaultModel: process.env.DEFAULT_MODEL || null
+  defaultModel: process.env.DEFAULT_MODEL || null,
+  hermesDashPort: parseInt(process.env.HERMES_DASH_PORT || '9119', 10),
+  hermesProxyPort: parseInt(process.env.HERMES_PROXY_PORT || '3001', 10)
 };
 
 const MODELS_META = readJson(path.join(__dirname, 'models.json')) || { default: 'anthropic.claude-haiku-4-5-20251001-v1:0', map: {}, suggested: [] };
@@ -85,6 +89,15 @@ function record(entry) {
 
 function tunnelUrl() {
   for (const p of ['/opt/aws-inference/TUNNEL_URL', path.join(__dirname, 'TUNNEL_URL')]) {
+    try {
+      const v = fs.readFileSync(p, 'utf8').trim();
+      if (v.startsWith('https://')) return v;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+function hermesUrl() {
+  for (const p of ['/opt/aws-inference/HERMES_URL', path.join(__dirname, 'HERMES_URL')]) {
     try {
       const v = fs.readFileSync(p, 'utf8').trim();
       if (v.startsWith('https://')) return v;
@@ -187,6 +200,7 @@ app.get('/api/stats', requireAuth, (req, res) => {
     default_model: CONFIG.defaultModel,
     region: CONFIG.region,
     tunnel_url: tunnelUrl(),
+    hermes_url: hermesUrl(),
     ...STATS,
     node: process.version
   });
@@ -402,4 +416,47 @@ app.use((req, res) => {
 
 app.listen(CONFIG.port, () => {
   console.log(`aws-inference v${VERSION} listening on :${CONFIG.port} (region ${CONFIG.region}, default model ${CONFIG.defaultModel})`);
+});
+
+// ---------------------------------------------------------------- hermes dashboard proxy
+// Hermes' own web panel (hermes dashboard) runs on 127.0.0.1:HERMES_DASH_PORT with its auth
+// gate disengaged (loopback bind) — this proxy IS the auth wall, and it also pipes the
+// WebSocket the embedded TUI chat needs. Exposed via its own quick tunnel (port 3001).
+const proxyApp = express();
+proxyApp.disable('x-powered-by');
+proxyApp.use((req, res, next) => {
+  if (extractKeyCandidates(req).some(keyOk)) return next();
+  res.set('WWW-Authenticate', 'Basic realm="hermes dashboard"');
+  return res.status(401).send('hermes dashboard: unauthorized (any user, password = API key)');
+});
+proxyApp.use((req, res) => {
+  const upstream = http.request(
+    { host: '127.0.0.1', port: CONFIG.hermesDashPort, path: req.url, method: req.method,
+      headers: { ...req.headers, host: `127.0.0.1:${CONFIG.hermesDashPort}` } },
+    (pr) => { res.writeHead(pr.statusCode || 502, pr.headers); pr.pipe(res); }
+  );
+  upstream.on('error', () => {
+    if (res.headersSent) return res.end();
+    res.status(502).json({ error: { message: 'hermes dashboard not reachable on this box', type: 'bad_gateway' } });
+  });
+  req.pipe(upstream);
+});
+const proxyServer = http.createServer((req, res) => proxyApp(req, res));
+proxyServer.on('upgrade', (req, sock, head) => {
+  if (!extractKeyCandidates(req).some(keyOk)) {
+    sock.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    return;
+  }
+  const target = net.connect(CONFIG.hermesDashPort, '127.0.0.1', () => {
+    const raw = [`${req.method} ${req.url} HTTP/1.1`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) raw.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    target.write(raw.join('\r\n') + '\r\n\r\n');
+    if (head?.length) target.write(head);
+    sock.pipe(target);
+    target.pipe(sock);
+  });
+  target.on('error', () => { try { sock.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'); } catch { /* gone */ } sock.destroy(); });
+});
+proxyServer.listen(CONFIG.hermesProxyPort, '127.0.0.1', () => {
+  console.log(`hermes dashboard proxy on 127.0.0.1:${CONFIG.hermesProxyPort} -> 127.0.0.1:${CONFIG.hermesDashPort}`);
 });

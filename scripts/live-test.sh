@@ -2,6 +2,7 @@
 # Live curl test suite. Usage: scripts/live-test.sh <BASE_URL> <API_KEY>
 set -u
 BASE="${1:?base url}"; KEY="${2:?api key}"
+HERMES_URL="${3:-}"
 PASS=0; FAIL=0
 t() { # t <name> <expected> <got>
   if [ "$3" = "$2" ]; then echo "  PASS  $1 (got $3)"; PASS=$((PASS+1));
@@ -71,6 +72,18 @@ echo "-- 8. /v1/models --"
 IDS=$(curl -sS "$BASE/v1/models" -H "Authorization: Bearer $KEY" | python3 -c 'import json,sys;d=json.load(sys.stdin)["data"];print(" ".join(m["id"] for m in d[:8]))' 2>/dev/null)
 echo "  models: ${IDS:-<none>}"
 [ -n "$IDS" ] && t "models list non-empty" 1 1 || t "models list non-empty" 1 0
+
+echo "-- 9. hermes dashboard behind the auth wall --"
+if [[ "$HERMES_URL" == https://* ]]; then
+  C=$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$HERMES_URL")
+  t "401 hermes without key" 401 "$C"
+  C=$(curl -s -o /dev/null -w '%{http_code}' -m 30 -u "web:$KEY" "$HERMES_URL")
+  t "200 hermes with key" 200 "$C"
+  T=$(curl -s -m 30 -u "web:$KEY" "$HERMES_URL" | head -c 200)
+  echo "  hermes body head: ${T:0:160}"
+else
+  echo "  (skipped — no hermes URL passed)"
+fi
 
 echo
 echo "RESULT: PASS=$PASS FAIL=$FAIL"

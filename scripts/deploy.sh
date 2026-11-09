@@ -162,15 +162,30 @@ else
   URL="$BASE"
 fi
 
-echo "== [3/4] fetching API key from SSM =="
+echo "== [3/4] fetching API key + hermes dashboard URL from SSM =="
 KEY=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/api-key" \
       --with-decryption --query 'Parameter.Value' --output text)
+
+if [[ "$URL" == https://* ]]; then
+  echo "  waiting for hermes dashboard tunnel (SSM $PREFIX/hermes-url)…"
+  HERMES_URL=""
+  for i in $(seq 1 40); do
+    HERMES_URL=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/hermes-url" \
+          --query 'Parameter.Value' --output text 2>/dev/null || true)
+    if [[ "$HERMES_URL" == https://* ]]; then break; fi
+    sleep 10
+  done
+  [[ "$HERMES_URL" == https://* ]] || { echo "hermes dashboard URL never published (gateway URL still live)"; HERMES_URL=""; }
+  echo "  hermes: $HERMES_URL"
+else
+  HERMES_URL="token-managed"
+fi
 
 if [[ "$URL" == https://* ]]; then BASE="$URL"; else BASE="${BASE:-http://$PUBLIC_IP}"; fi
 
 echo "== [4/4] live curl tests =="
 if [[ "$BASE" == https://* ]]; then
-  bash scripts/live-test.sh "$BASE" "$KEY" || true
+  bash scripts/live-test.sh "$BASE" "$KEY" "$HERMES_URL" || true
 else
   echo "named-tunnel mode: no public HTTPS URL known to this script — set BASE=https://<your-tunnel-host> and rerun tests."
 fi
@@ -178,6 +193,7 @@ fi
 echo
 echo "================================================================"
 echo " PUBLIC URL   : $BASE"
+echo " HERMES DASH  : ${HERMES_URL:-<not published>}   (Hermes Agent web panel, same key)"
 echo " API KEY      : $KEY"
 echo " dashboard    : $BASE/            (basic auth user=anything, pass=\$KEY; or paste key in the page)"
 echo " openai api   : POST $BASE/v1/chat/completions"

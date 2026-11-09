@@ -26,6 +26,10 @@ you ──HTTPS──> trycloudflare.com tunnel ──> cloudflared (EC2, egress
 - Security group with **no ingress rules at all** (egress only) — created OUTSIDE
   CloudFormation by `deploy.sh` (plain EC2 API) and passed as the `SgId` parameter,
   because some backends flip-fail `SecurityGroup` template bodies
+- **Two public URLs**: the gateway URL (API + status dashboard) and a second
+  quick-tunnel serving the **Hermes Agent web panel** (`hermes dashboard`, port 9119 on
+  the box) through an authenticated reverse proxy in `server.js` (also pipes the
+  WebSocket the embedded TUI chat needs). Same password on both.
 - user-data → `ec2/bootstrap.sh`, which installs:
   - **Node 22** (official tarball) + gateway deps (`npm install`)
   - **cloudflared** (quick tunnel by default; named tunnel if you pass `TunnelToken`)

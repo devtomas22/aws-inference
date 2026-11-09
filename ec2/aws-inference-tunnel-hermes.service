@@ -1,0 +1,14 @@
+[Unit]
+Description=cloudflared quick tunnel for the hermes dashboard proxy
+After=aws-inference.service
+Wants=aws-inference.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3001
+Restart=always
+RestartSec=5
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

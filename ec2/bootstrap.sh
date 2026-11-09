@@ -124,9 +124,13 @@ for U in ssm-user ec2-user; do
 done
 
 # --- start services
+cp "$REPO/ec2/aws-inference-hermes.service" /etc/systemd/system/
+cp "$REPO/ec2/aws-inference-tunnel-hermes.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now aws-inference.service
+systemctl enable --now aws-inference-hermes.service
 systemctl enable --now aws-inference-tunnel.service
+systemctl enable --now aws-inference-tunnel-hermes.service
 systemctl enable --now aws-inference-publish.service
 
 echo "== bootstrap done =="

@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes Agent web dashboard (127.0.0.1 only; auth wall handled by the gateway proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/root
+ExecStart=/bin/bash -lc 'exec hermes dashboard --host 127.0.0.1 --port 9119 --no-open'
+Restart=always
+RestartSec=5
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
