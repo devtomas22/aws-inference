@@ -114,6 +114,7 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
+          # user-data rev 2026-11-09c: stream fix (res-close, watchdog+Converse fallback), sdk bump
           exec > >(tee /var/log/aws-inference-user-data.log) 2>&1
           mkdir -p /opt/aws-inference
           curl -fsS -o /dev/null https://github.com || echo NET-FAIL-github

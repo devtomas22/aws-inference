@@ -292,7 +292,9 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
   res.flushHeaders?.();
 
   let clientGone = false;
-  req.on('close', () => { clientGone = true; });
+  // NOTE: req 'close' fires when the request body finishes (node http semantics),
+  // NOT on client disconnect — it must NOT be used to detect client-gone.
+  res.on('close', () => { clientGone = true; });
 
   const send = (obj) => {
     if (clientGone) return false;
@@ -304,8 +306,13 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
     choices: [{ index: 0, delta, finish_reason: finish ?? null }]
   });
 
+  // CRIS streaming on some paths returns headers but no event frames — watch
+  // the stream and fall back to Converse if nothing arrives
+  const ac = new AbortController();
+  let gotAny = false;
+  const watchdog = setTimeout(() => { if (!gotAny) { console.error('[chat-stream] watchdog: aborting stalled stream'); ac.abort(); } }, 20000);
   try {
-    const streamResp = await RUNTIME.send(new ConverseStreamCommand(params));
+    const streamResp = await RUNTIME.send(new ConverseStreamCommand(params), { abortSignal: ac.signal });
     chunk({ role: 'assistant', content: '' });
     let toolIdx = -1;
     let stopReason = 'end_turn';
@@ -314,6 +321,7 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
     const events = (streamResp && (streamResp.stream ?? streamResp.eventStream ?? streamResp.body)) ?? [];
     if (!events?.[Symbol.asyncIterator]) throw new Error('no event stream in ConverseStream response (keys: ' + Object.keys(streamResp || {}).join(',') + ')');
     for await (const ev of events) {
+      gotAny = true;
       if (clientGone) break;
       if (ev.messageStart) { continue; }
       if (ev.contentBlockStart) {
@@ -342,6 +350,7 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
         usageRec.total_tokens = ev.metadata.usage.totalTokens ?? (usageRec.prompt_tokens + usageRec.completion_tokens);
       }
     }
+    clearTimeout(watchdog);
     if (!clientGone) {
       chunk({}, finishReasonFromStopReason(stopReason));
       if (body.stream_options?.include_usage) {
@@ -352,6 +361,30 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
     }
     finishRecord(true, null);
   } catch (e) {
+    clearTimeout(watchdog);
+    // stalled ConverseStream (headers OK, zero event frames) → pseudo-stream via Converse
+    if (!gotAny && (e.name === 'AbortError' || e.name === 'TimeoutError') && !clientGone) {
+      console.error('[chat-stream] stalled ConverseStream (no event frames), falling back to Converse');
+      try {
+        const out = await RUNTIME.send(new ConverseCommand(params));
+        const conv = converseToOpenAi(out);
+        Object.assign(usageRec, conv.usage);
+        const m = conv.message;
+        if (m.tool_calls) chunk(m.tool_calls, conv.finish_reason);
+        else chunk({ content: m.content }, conv.finish_reason);
+        send({ id: cid, object: 'chat.completion.chunk', created, model: echoed || modelId, choices: [], usage: conv.usage });
+        res.write('data: [DONE]\n\n');
+        res.end();
+        finishRecord(true, null);
+      } catch (e2) {
+        finishRecord(false, e2);
+        try {
+          res.write(`data: ${JSON.stringify({ error: { message: e2.message || String(e2), type: 'api_error', code: e2.name || 'stream_error' } })}\n\n`);
+          res.end();
+        } catch { /* client gone */ }
+      }
+      return;
+    }
     if (!clientGone) {
       try {
         res.write(`data: ${JSON.stringify({ error: { message: e.message || String(e), type: 'api_error', code: e.name || 'stream_error' } })}\n\n`);
