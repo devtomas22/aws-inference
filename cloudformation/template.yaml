@@ -53,8 +53,8 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                 Resource:
-                  - arn:aws:bedrock:*::foundation-model/*
-                  - arn:aws:bedrock:*:*:inference-profile/*
+                  - arn:aws:bedrock:us-east-1::foundation-model/*
+                  - arn:aws:bedrock:us-east-1:*:inference-profile/*
               - Sid: BedrockList
                 Effect: Allow
                 Action:
@@ -67,7 +67,7 @@ Resources:
                   - ssm:PutParameter
                   - ssm:GetParameter
                   - ssm:AddTagsToResource
-                Resource: !Sub 'arn:aws:ssm:*:*:parameter/inf-gw/${AWS::StackName}*'
+                Resource: !Sub 'arn:aws:ssm:us-east-1:*:parameter/inf-gw/${AWS::StackName}*'
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -104,7 +104,7 @@ Resources:
           mkdir -p /opt/aws-inference
           for i in 1 2 3; do git clone --depth 1 ${RepoUrl} /opt/aws-inference/repo && break; sleep 10; done
           export STACK_NAME=${AWS::StackName}
-          export AWS_DEFAULT_REGION=${AWS::Region}
+          export AWS_DEFAULT_REGION=us-east-1
           export TUNNEL_TOKEN=${TunnelToken}
           bash /opt/aws-inference/repo/ec2/bootstrap.sh
 

@@ -1,6 +1,7 @@
 # aws-inference
 
-OpenAI / Hermes-Agent-compatible API gateway for **AWS Bedrock**, one-command deployable:
+OpenAI / Hermes-Agent-compatible API gateway for **AWS Bedrock**, one-command deployable
+(**pinned to us-east-1**):
 
     PROFILE=sandbox bash scripts/deploy.sh
 
