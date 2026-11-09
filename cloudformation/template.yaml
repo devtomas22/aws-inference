@@ -119,6 +119,8 @@ Resources:
           curl -fsS -o /dev/null https://github.com || echo NET-FAIL-github
           curl -fsS -o /dev/null https://nodejs.org || echo NET-FAIL-nodejs
           curl -fsS -o /dev/null https://hermes-agent.nousresearch.com || echo NET-FAIL-hermes
+          dnf install -y -q git || echo FAIL-DNF-GIT   # base AL2023 AMI ships no git; clone needs it NOW
+          command -v git >/dev/null || { echo FAIL-NO-GIT; exit 1; }
           for i in 1 2 3; do git clone --depth 1 ${RepoUrl} /opt/aws-inference/repo && break; sleep 10; done
           [ -f /opt/aws-inference/repo/ec2/bootstrap.sh ] || { echo CLONE-FAIL-github; exit 1; }
           export STACK_NAME=${AWS::StackName}
