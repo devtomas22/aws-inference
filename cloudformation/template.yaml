@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  aws-inference — OpenAI/Hermes-compatible API gateway for AWS Bedrock on EC2.
+  Zero inbound ports (Cloudflare Tunnel), basic-auth + bearer token auth wall,
+  dashboard, installs hermes + node via user-data. Quick Cloudflare tunnel by
+  default (public trycloudflare.com URL published to SSM Parameter Store).
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t3.small
+    Description: EC2 instance type (t3.small recommended; micro works but is tight)
+  KeyName:
+    Type: String
+    Default: ''
+    Description: Optional EC2 key pair name for SSH (Session Manager always available)
+  RepoUrl:
+    Type: String
+    Default: https://github.com/devtomas22/aws-inference.git
+  TunnelToken:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional Cloudflare named-tunnel token. Empty = quick trycloudflare.com tunnel.
+  LatestAmi:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, '']]
+  HasTunnelToken: !Not [!Equals [!Ref TunnelToken, '']]
+
+Resources:
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: bedrock-and-params
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: BedrockInvoke
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - arn:aws:bedrock:*::foundation-model/*
+                  - arn:aws:bedrock:*:*:inference-profile/*
+              - Sid: BedrockList
+                Effect: Allow
+                Action:
+                  - bedrock:ListFoundationModels
+                  - bedrock:ListInferenceProfiles
+                Resource: '*'
+              - Sid: PublishParams
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:AddTagsToResource
+                Resource: !Sub 'arn:aws:ssm:*:*:parameter/aws-inference-${AWS::StackName}*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: { Roles: [!Ref InstanceRole] }
+
+  SecurityGroup:
+    Type: AWS::SecurityGroup
+    Properties:
+      GroupDescription: aws-inference - egress only (all access via Cloudflare Tunnel + SSM)
+      SecurityGroupEgress:
+        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmi
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!Ref SecurityGroup]
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref 'AWS::NoValue']
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 16, VolumeType: gp3, Encrypted: true }
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-inference" }
+        - { Key: project, Value: aws-inference }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          exec > /var/log/aws-inference-user-data.log 2>&1
+          mkdir -p /opt/aws-inference
+          for i in 1 2 3; do git clone --depth 1 ${RepoUrl} /opt/aws-inference/repo && break; sleep 10; done
+          export STACK_NAME=${AWS::StackName}
+          export AWS_DEFAULT_REGION=${AWS::Region}
+          export TUNNEL_TOKEN=${TunnelToken}
+          bash /opt/aws-inference/repo/ec2/bootstrap.sh
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  PublicIP:
+    Value: !GetAtt Instance.PublicIp
+  SsmParamPrefix:
+    Value: !Sub "/aws-inference/${AWS::StackName}"

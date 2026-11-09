@@ -1,0 +1,17 @@
+[Unit]
+Description=aws-inference OpenAI-compatible Bedrock gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aws-inference/repo
+ExecStart=/opt/node/bin/node /opt/aws-inference/repo/server.js
+EnvironmentFile=/opt/aws-inference/env-vars
+Restart=always
+RestartSec=5
+StandardOutput=journal
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

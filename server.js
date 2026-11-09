@@ -1,0 +1,368 @@
+#!/usr/bin/env node
+// aws-inference: OpenAI-compatible API gateway for AWS Bedrock (Hermes Agent compatible).
+// Auth: Bearer or Basic with the API key. Streaming SSE, tool calling, /v1/models.
+import express from 'express';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  BedrockRuntimeClient,
+  ConverseCommand,
+  ConverseStreamCommand
+} from '@aws-sdk/client-bedrock-runtime';
+import {
+  messagesToConverse,
+  toolsToConverse,
+  converseToOpenAi,
+  finishReasonFromStopReason
+} from './lib/converse.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const VERSION = '1.0.0';
+const START = Date.now();
+
+// ---------------------------------------------------------------- env / config
+function loadEnvFile(p) {
+  try {
+    for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
+      if (m && m[1].toUpperCase() !== 'API_KEY_OR_COMMENT' && process.env[m[1]] === undefined) {
+        process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+      }
+    }
+  } catch { /* no .env — fine, rely on process env */ }
+}
+loadEnvFile(path.join(__dirname, '.env'));
+
+if (!process.env.API_KEY) {
+  process.env.API_KEY = crypto.randomBytes(16).toString('hex');
+  console.warn('[warn] API_KEY missing — generated one for this run:',
+    process.env.API_KEY, '(write it to .env for persistence)');
+}
+
+const CONFIG = {
+  port: parseInt(process.env.PORT || '3000', 10),
+  apiKey: process.env.API_KEY,
+  region: process.env.BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1',
+  defaultModel: process.env.DEFAULT_MODEL || null
+};
+
+const MODELS_META = readJson(path.join(__dirname, 'models.json')) || { default: 'anthropic.claude-haiku-4-5-20251001-v1:0', map: {}, suggested: [] };
+if (!CONFIG.defaultModel) CONFIG.defaultModel = MODELS_META.default;
+
+const RUNTIME = new BedrockRuntimeClient({ region: CONFIG.region });
+// control-plane client, imported lazily so /v1/models can list models
+const { BedrockClient, ListInferenceProfilesCommand, ListFoundationModelsCommand } =
+  await import('@aws-sdk/client-bedrock');
+const CONTROL = new BedrockClient({ region: CONFIG.region });
+
+function readJson(p) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+// ---------------------------------------------------------------- stats
+const STATS = {
+  totalRequests: 0,
+  tokensIn: 0,
+  tokensOut: 0,
+  errors: 0,
+  byModel: {},
+  recent: [] // cap 40
+};
+function record(entry) {
+  STATS.totalRequests += 1;
+  if (entry.ok) {
+    STATS.tokensIn += entry.usage?.prompt_tokens || 0;
+    STATS.tokensOut += entry.usage?.completion_tokens || 0;
+    STATS.byModel[entry.model] = (STATS.byModel[entry.model] || 0) + 1;
+  } else {
+    STATS.errors += 1;
+  }
+  STATS.recent.unshift({ ...entry, t: Date.now() });
+  STATS.recent.length = Math.min(STATS.recent.length, 40);
+}
+
+function tunnelUrl() {
+  for (const p of ['/opt/aws-inference/TUNNEL_URL', path.join(__dirname, 'TUNNEL_URL')]) {
+    try {
+      const v = fs.readFileSync(p, 'utf8').trim();
+      if (v.startsWith('https://')) return v;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- auth
+const KEY_HASH = crypto.createHash('sha256').update(CONFIG.apiKey).digest();
+function keyOk(candidate) {
+  if (!candidate) return false;
+  const h = crypto.createHash('sha256').update(candidate).digest();
+  return crypto.timingSafeEqual(h, KEY_HASH);
+}
+function extractKeyCandidates(req) {
+  const h = req.headers.authorization || '';
+  if (/^Bearer\s+/i.test(h)) return [h.replace(/^Bearer\s+/i, '').trim()];
+  if (/^Basic\s+/i.test(h)) {
+    try {
+      const dec = Buffer.from(h.replace(/^Basic\s+/i, ''), 'base64').toString('utf8');
+      const i = dec.indexOf(':');
+      return [dec, i >= 0 ? dec.slice(i + 1) : '', i >= 0 ? dec.slice(0, i) : ''];
+    } catch { return []; }
+  }
+  const xk = req.headers['x-api-key'];
+  return xk ? [String(xk)] : [];
+}
+function requireAuth(req, res, next) {
+  if (extractKeyCandidates(req).some(keyOk)) return next();
+  res.set('WWW-Authenticate', 'Basic realm="aws-inference"');
+  return res.status(401).json({ error: { message: 'Missing or invalid API key', type: 'auth_error', code: 'invalid_api_key' } });
+}
+
+// ---------------------------------------------------------------- models listing
+let modelCache = { at: 0, ids: null };
+async function listBedrockModelIds() {
+  if (modelCache.ids && Date.now() - modelCache.at < 5 * 60_000) return modelCache.ids;
+  const ids = new Set();
+  try {
+    const r = await CONTROL.send(new ListInferenceProfilesCommand({ maxResults: 200 }));
+    for (const p of r.inferenceProfileSummaries || []) {
+      if (p.type === 'SYSTEM_DEFINED' || !p.type) ids.add(p.inferenceProfileId);
+    }
+  } catch (e) { /* fall through */ }
+  if (ids.size < 3) {
+    try {
+      const r = await CONTROL.send(new ListFoundationModelsCommand({}));
+      for (const m of r.modelSummaries || []) {
+        if ((m.modelLifecycle?.status || 'ACTIVE') !== 'ACTIVE') continue;
+        if (!(m.outputModalities || []).includes('TEXT')) continue;
+        ids.add(m.modelId);
+      }
+    } catch { /* fall through */ }
+  }
+  if (ids.size) { modelCache = { at: Date.now(), ids: [...ids] }; return [...ids]; }
+  throw new Error('bedrock listing unavailable');
+}
+function suggestDefault() {
+  const prefs = ['claude-haiku', 'claude-sonnet', 'glm-4.7-flash', 'nova-lite', 'nova-micro', 'gpt-oss-120b', 'glm', 'nova'];
+  for (const p of prefs) {
+    const hit = (modelCache.ids || []).find((id) => id.includes(p));
+    if (hit) return hit;
+  }
+  return (modelCache.ids || [])[0] || MODELS_META.default;
+}
+
+function resolveModel(requested) {
+  const map = MODELS_META.map || {};
+  if (requested && map[requested]) return { id: map[requested], echoed: requested };
+  if (!requested || requested === 'default') return { id: CONFIG.defaultModel || suggestDefault(), echoed: requested };
+  return { id: requested, echoed: requested }; // Bedrock ids (incl. inference profiles) pass straight through
+}
+
+// ---------------------------------------------------------------- app
+const app = express();
+app.disable('x-powered-by');
+app.use(express.json({ limit: '4mb' }));
+app.use((req, res, next) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'authorization, content-type, x-api-key');
+  res.set('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+app.get('/health', (req, res) => {
+  res.json({ ok: true, version: VERSION, uptime_s: Math.round((Date.now() - START) / 1000), region: CONFIG.region });
+});
+
+app.get('/', requireAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/api/stats', requireAuth, (req, res) => {
+  res.json({
+    version: VERSION,
+    uptime_s: Math.round((Date.now() - START) / 1000),
+    default_model: CONFIG.defaultModel,
+    region: CONFIG.region,
+    tunnel_url: tunnelUrl(),
+    ...STATS,
+    node: process.version
+  });
+});
+
+app.get('/v1/models', requireAuth, async (req, res) => {
+  let ids;
+  try { ids = await listBedrockModelIds(); }
+  catch { ids = MODELS_META.suggested || []; }
+  const data = ids.map((id) => ({ id, object: 'model', created: Math.floor(START / 1000), owned_by: 'bedrock' }));
+  res.json({ object: 'list', data });
+});
+
+// ---------------------------------------------------------------- chat completions
+function errorStatus(e) {
+  const name = e?.name || '';
+  if (name === 'AccessDeniedException') return { code: 403, type: 'permission_error' };
+  if (name === 'ResourceNotFoundException' || name === 'NotFoundException') return { code: 404, type: 'invalid_request_error' };
+  if (name === 'ThrottlingException' || name === 'TooManyRequestsException') return { code: 429, type: 'rate_limit_error' };
+  if (name === 'ValidationException') return { code: 400, type: 'invalid_request_error' };
+  if (name === 'ModelNotReadyException') return { code: 503, type: 'temporarily_unavailable' };
+  if (name === 'ServiceUnavailableException') return { code: 503, type: 'temporarily_unavailable' };
+  return { code: 500, type: 'api_error' };
+}
+function sendError(res, e, extra) {
+  const { code, type } = errorStatus(e);
+  const msg = extra ? `${extra}: ${e.message}` : e.message;
+  console.error(`[chat] ${code} ${e.name || 'Error'} ${msg}`);
+  res.status(code).json({ error: { message: msg, type, code: e.name || String(code) } });
+}
+
+function toConverseParams(body, modelId, msgs) {
+  const conv = messagesToConverse(msgs);
+  const params = {
+    modelId,
+    messages: conv.messages,
+    system: conv.system,
+    inferenceConfig: {}
+  };
+  const mt = body.max_completion_tokens ?? body.max_tokens;
+  if (mt != null) params.inferenceConfig.maxTokens = Math.min(parseInt(mt, 10) || 4096, 100_000);
+  else params.inferenceConfig.maxTokens = 4096;
+  if (body.temperature != null) params.inferenceConfig.temperature = Math.max(0, Math.min(1, Number(body.temperature)));
+  if (body.top_p != null) params.inferenceConfig.topP = Math.max(0, Math.min(1, Number(body.top_p)));
+  if (Array.isArray(body.stop) && body.stop.length) params.inferenceConfig.stopSequences = body.stop.map(String).slice(0, 4);
+  const tc = toolsToConverse(body.tools, body.tool_choice);
+  if (tc) params.toolConfig = tc;
+  return params;
+}
+
+app.post('/v1/chat/completions', requireAuth, async (req, res) => {
+  const body = req.body || {};
+  const msgs = body.messages;
+  if (!Array.isArray(msgs) || !msgs.length) {
+    return res.status(400).json({ error: { message: 'messages array required', type: 'invalid_request_error' } });
+  }
+  const { id: modelId, echoed } = resolveModel(body.model);
+  const stream = !!body.stream;
+  const started = Date.now();
+  let params;
+  try { params = toConverseParams(body, modelId, msgs); }
+  catch (e) { return sendError(res, e, 'converting request'); }
+
+  const cid = `chatcmpl-${crypto.randomUUID()}`;
+  const created = Math.floor(Date.now() / 1000);
+  const usageRec = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+  const finishRecord = (ok, err) => {
+    record({
+      ok, model: modelId, ms: Date.now() - started, stream,
+      usage: ok ? usageRec : null,
+      err: err ? String(err.message || err).slice(0, 160) : null
+    });
+  };
+
+  if (!stream) {
+    try {
+      const out = await RUNTIME.send(new ConverseCommand(params));
+      const conv = converseToOpenAi(out);
+      Object.assign(usageRec, conv.usage);
+      finishRecord(true, null);
+      const resp = {
+        id: cid,
+        object: 'chat.completion',
+        created,
+        model: echoed || modelId,
+        choices: [{ index: 0, message: conv.message, finish_reason: conv.finish_reason }],
+        usage: conv.usage
+      };
+      return res.json(resp);
+    } catch (e) {
+      finishRecord(false, e);
+      return sendError(res, e, `Bedrock model ${modelId}`);
+    }
+  }
+
+  // ---------------- streaming ----------------
+  res.status(200);
+  res.set('Content-Type', 'text/event-stream; charset=utf-8');
+  res.set('Cache-Control', 'no-cache');
+  res.set('Connection', 'keep-alive');
+  res.set('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  let clientGone = false;
+  req.on('close', () => { clientGone = true; });
+
+  const send = (obj) => {
+    if (clientGone) return false;
+    try { res.write(`data: ${JSON.stringify(obj)}\n\n`); return true; }
+    catch { clientGone = true; return false; }
+  };
+  const chunk = (delta, finish) => send({
+    id: cid, object: 'chat.completion.chunk', created, model: echoed || modelId,
+    choices: [{ index: 0, delta, finish_reason: finish ?? null }]
+  });
+
+  try {
+    const streamResp = await RUNTIME.send(new ConverseStreamCommand(params));
+    chunk({ role: 'assistant', content: '' });
+    let toolIdx = -1;
+    let stopReason = 'end_turn';
+    for await (const ev of streamResp.eventStream ?? streamResp.body ?? []) {
+      if (clientGone) break;
+      if (ev.messageStart) { continue; }
+      if (ev.contentBlockStart) {
+        const tu = ev.contentBlockStart.start?.toolUse;
+        if (tu) {
+          toolIdx += 1;
+          chunk({ tool_calls: [{ index: toolIdx, id: tu.toolUseId, type: 'function', function: { name: tu.name, arguments: '' } }] });
+        }
+        continue;
+      }
+      if (ev.contentBlockDelta) {
+        const d = ev.contentBlockDelta.delta || {};
+        if (d.text) chunk({ content: d.text });
+        if (d.toolUse && d.toolUse.input && toolIdx >= 0) {
+          chunk({ tool_calls: [{ index: toolIdx, function: { arguments: d.toolUse.input } }] });
+        }
+        continue;
+      }
+      if (ev.messageStop) {
+        stopReason = ev.messageStop.stopReason || stopReason;
+        continue;
+      }
+      if (ev.metadata?.usage) {
+        usageRec.prompt_tokens = ev.metadata.usage.inputTokens ?? 0;
+        usageRec.completion_tokens = ev.metadata.usage.outputTokens ?? 0;
+        usageRec.total_tokens = ev.metadata.usage.totalTokens ?? (usageRec.prompt_tokens + usageRec.completion_tokens);
+      }
+    }
+    if (!clientGone) {
+      chunk({}, finishReasonFromStopReason(stopReason));
+      if (body.stream_options?.include_usage) {
+        send({ id: cid, object: 'chat.completion.chunk', created, model: echoed || modelId, choices: [], usage: usageRec });
+      }
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+    finishRecord(true, null);
+  } catch (e) {
+    if (!clientGone) {
+      try {
+        res.write(`data: ${JSON.stringify({ error: { message: e.message || String(e), type: 'api_error', code: e.name || 'stream_error' } })}\n\n`);
+        res.end();
+      } catch { /* client gone */ }
+    }
+    finishRecord(false, e);
+    console.error('[chat-stream]', e.name || 'Error', e.message);
+  }
+});
+
+app.use((req, res) => {
+  res.status(404).json({ error: { message: `no route: ${req.method} ${req.path}`, type: 'invalid_request_error' } });
+});
+
+app.listen(CONFIG.port, () => {
+  console.log(`aws-inference v${VERSION} listening on :${CONFIG.port} (region ${CONFIG.region}, default model ${CONFIG.defaultModel})`);
+});

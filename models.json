@@ -1,0 +1,30 @@
+{
+  "default": "anthropic.claude-haiku-4-5-20251001-v1:0",
+  "map": {
+    "haiku": "anthropic.claude-haiku-4-5-20251001-v1:0",
+    "sonnet": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "opus": "anthropic.claude-opus-4-5-20251101-v1:0",
+    "glm": "zai.glm-5.3",
+    "glm-fast": "zai.glm-4.7-flash",
+    "nova": "amazon.nova-lite-v1:0",
+    "nova-pro": "amazon.nova-pro-v1:0",
+    "kimi": "moonshotai.kimi-k2.5",
+    "deepseek": "deepseek.v3.2",
+    "gpt-oss": "openai.gpt-oss-120b-1:0"
+  },
+  "suggested": [
+    "anthropic.claude-haiku-4-5-20251001-v1:0",
+    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "anthropic.claude-opus-4-5-20251101-v1:0",
+    "zai.glm-5.3",
+    "zai.glm-4.7-flash",
+    "amazon.nova-lite-v1:0",
+    "amazon.nova-pro-v1:0",
+    "amazon.nova-micro-v1:0",
+    "openai.gpt-oss-120b-1:0",
+    "deepseek.v3.2",
+    "moonshotai.kimi-k2.5",
+    "mistral.mistral-large-3-675b-instruct",
+    "qwen.qwen3-coder-next"
+  ]
+}

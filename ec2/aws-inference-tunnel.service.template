@@ -1,0 +1,15 @@
+[Unit]
+Description=cloudflared tunnel for aws-inference
+After=aws-inference.service
+Wants=aws-inference.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared @TUNNEL_EXEC@
+EnvironmentFile=@ENVF@
+Restart=always
+RestartSec=5
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

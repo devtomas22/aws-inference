@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aws-inference · Bedrock gateway</title>
+<style>
+  :root { --bg:#0b0e14; --panel:#131824; --line:#232b3d; --fg:#e6ebf5; --dim:#8b95a8; --acc:#5b9dff; --ok:#3ecf8e; --err:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .dim { color: var(--dim); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .pill { border:1px solid var(--line); border-radius:999px; padding:2px 10px; font-size:12px; color:var(--dim); }
+  .pill b { color: var(--fg); font-weight: 500; }
+  .dot { width:8px;height:8px;border-radius:50%;background:var(--err);display:inline-block;margin-right:6px; }
+  .dot.ok { background: var(--ok); }
+  section { background: var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; margin-top:16px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 12px; }
+  input, textarea, select, button { background:#0d1220; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; font:inherit; }
+  input:focus, textarea:focus, select:focus { outline:1px solid var(--acc); }
+  button { background:#16203a; cursor:pointer; }
+  button:hover { border-color: var(--acc); }
+  button:disabled { opacity:.5; cursor:default; }
+  textarea { width:100%; min-height:72px; resize:vertical; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; }
+  th { color: var(--dim); font-weight: 400; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:12px; }
+  .card { border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .card .v { font-size:20px; }
+  pre { background:#0d1220; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; white-space:pre-wrap; word-break:break-word; margin:8px 0; }
+  .out { min-height: 60px; }
+  .copy { float:right; font-size:11px;}
+  .err { color: var(--err); }
+  .okc { color: var(--ok); }
+  a { color: var(--acc); }
+</style>
+</head>
+<body>
+<main>
+  <h1>aws-inference <span class="dim">· OpenAI-compatible Bedrock gateway</span></h1>
+  <div class="row">
+    <span class="pill"><span class="dot" id="dot"></span><span id="health">connecting…</span></span>
+    <span class="pill">region <b id="region">–</b></span>
+    <span class="pill">default model <b id="dmodel">–</b></span>
+    <span class="pill">tunnel <b id="turl">–</b></span>
+    <span class="pill">uptime <b id="uptime">–</b></span>
+  </div>
+
+  <section id="keySection">
+    <h2>API key</h2>
+    <div class="row">
+      <input id="apiKey" type="password" placeholder="paste API key (stored in localStorage)" style="flex:1">
+      <button id="saveKey">save</button>
+      <button id="clearKey">forget</button>
+    </div>
+    <p class="dim" style="margin-bottom:0">Key is sent as <code>Authorization: Bearer &lt;key&gt;</code>. The dashboard, /v1/* and /api/* share it.</p>
+  </section>
+
+  <section>
+    <h2>Stats</h2>
+    <div class="cards">
+      <div class="card"><div class="dim">requests</div><div class="v" id="sReqs">–</div></div>
+      <div class="card"><div class="dim">tokens in / out</div><div class="v" id="sTok">–</div></div>
+      <div class="card"><div class="dim">errors</div><div class="v" id="sErr">–</div></div>
+      <div class="card"><div class="dim">node</div><div class="v" style="font-size:14px" id="sNode">–</div></div>
+    </div>
+    <table id="sModels"><thead><tr><th>model</th><th>requests</th></tr></thead><tbody></tbody></table>
+    <h2 style="margin-top:14px">Recent</h2>
+    <table id="sRecent"><thead><tr><th>when</th><th>model</th><th>ms</th><th>stream</th><th>result</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <section>
+    <h2>Chat playground (streamed)</h2>
+    <div class="row" style="margin-bottom:8px">
+      <select id="chatModel" style="flex:1"></select>
+      <input id="chatSystem" placeholder="system prompt (optional)" style="flex:2">
+      <button id="chatSend">send</button>
+    </div>
+    <textarea id="chatInput" placeholder="Ask anything…">&#9679; Say hello and name the model you are.</textarea>
+    <pre class="out" id="chatOut">–</pre>
+  </section>
+
+  <section>
+    <h2>Integrate</h2>
+    <button class="copy" data-t="curlSnip">copy</button>
+    <h2 style="margin:0 0 4px">curl</h2>
+    <pre id="curlSnip"></pre>
+    <button class="copy" data-t="hermesSnip">copy</button>
+    <h2 style="margin:0 0 4px">Hermes Agent config (~/.hermes/config.yaml)</h2>
+    <pre id="hermesSnip"></pre>
+    <p class="dim" style="margin:0">On the EC2 box use <code>http://127.0.0.1:3000/v1</code>; from anywhere else use the tunnel URL above.</p>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const key = () => localStorage.getItem('ai_key') || '';
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key(), ...(opts.headers || {}) } });
+  if (r.status === 401) throw new Error('401 — set the API key above');
+  return r;
+}
+function fmtDur(s) { const m = Math.floor(s/60), h = Math.floor(m/60); return h ? `${h}h ${m%60}m` : `${m}m ${s%60}s`; }
+function esc(s) { return (s ?? '').toString().replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+$('saveKey').onclick = () => { localStorage.setItem('ai_key', $('apiKey').value.trim()); refreshAll(); };
+$('clearKey').onclick = () => { localStorage.removeItem('ai_key'); $('apiKey').value = ''; refreshAll(); };
+$('apiKey').value = key();
+
+document.querySelectorAll('.copy').forEach((b) => b.onclick = () => { navigator.clipboard.writeText($(b.dataset.t).textContent); b.textContent = 'copied!'; setTimeout(() => b.textContent = 'copy', 1200); });
+
+async function refreshHealth() {
+  try {
+    const r = await fetch('/health'); const j = await r.json();
+    $('dot').classList.add('ok'); $('health').textContent = 'healthy';
+    $('uptime').textContent = fmtDur(j.uptime_s);
+  } catch { $('dot').classList.remove('ok'); $('health').textContent = 'unreachable'; }
+}
+async function refreshStats() {
+  if (!key()) return;
+  try {
+    const j = await (await api('/api/stats')).json();
+    $('region').textContent = j.region; $('dmodel').textContent = (j.default_model || '').slice(0, 44);
+    $('turl').textContent = j.tunnel_url || 'quick tunnel pending';
+    $('sReqs').textContent = j.totalRequests; $('sErr').textContent = j.errors;
+    $('sTok').textContent = `${j.tokensIn} / ${j.tokensOut}`;
+    $('sNode').textContent = j.node;
+    const tb = $('sModels').querySelector('tbody'); tb.innerHTML = '';
+    Object.entries(j.byModel || {}).sort((a,b) => b[1]-a[1]).slice(0, 12).forEach(([m, c]) => {
+      tb.insertAdjacentHTML('beforeend', `<tr><td>${esc(m)}</td><td>${c}</td></tr>`);
+    });
+    const tr = $('sRecent').querySelector('tbody'); tr.innerHTML = '';
+    (j.recent || []).slice(0, 12).forEach((r) => {
+      tr.insertAdjacentHTML('beforeend',
+        `<tr><td>${new Date(r.t).toLocaleTimeString()}</td><td>${esc(r.model)}</td><td>${r.ms}</td><td>${r.stream ? 'sse' : 'json'}</td><td class="${r.ok ? 'okc' : 'err'}">${r.ok ? 'ok' : esc(r.err)}</td></tr>`);
+    });
+  } catch (e) { console.warn(e); }
+}
+async function refreshModels() {
+  if (!key()) return;
+  try {
+    const j = await (await api('/v1/models')).json();
+    const sel = $('chatModel'), cur = sel.value;
+    sel.innerHTML = j.data.map((m) => `<option>${m.id}</option>`).join('');
+    if (cur && j.data.some((m) => m.id === cur)) sel.value = cur;
+  } catch {}
+}
+function snippets() {
+  const base = location.origin, k = key() || '<YOUR_API_KEY>';
+  $('curlSnip').textContent = `curl -s ${base}/v1/chat/completions \\\n  -H "Authorization: Bearer ${k}" \\\n  -H "content-type: application/json" \\\n  -d '{"model":"${$('dmodel').textContent || 'default'}","messages":[{"role":"user","content":"Hello from Bedrock"}]}'`;
+  $('hermesSnip').textContent = `model:
+  provider: custom
+  base_url: ${base}/v1
+  api_key: \${BEDROCK_GATEWAY_API_KEY}
+  default: ${$('dmodel').textContent || 'anthropic.claude-haiku-4-5-20251001-v1:0'}
+  # ~/.hermes/.env:  BEDROCK_GATEWAY_API_KEY=${k}`;
+}
+$('dmodel').addEventListener('DOMSubtreeModified', snippets);
+function refreshAll() { snippets(); refreshHealth(); refreshStats(); refreshModels(); }
+$('chatSend').onclick = () => {
+  const out = $('chatOut'); out.textContent = '';
+  $('chatSend').disabled = true;
+  const msgs = [];
+  if ($('chatSystem').value.trim()) msgs.push({ role: 'system', content: $('chatSystem').value.trim() });
+  msgs.push({ role: 'user', content: $('chatInput').value });
+  fetch('/v1/chat/completions', {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key() },
+    body: JSON.stringify({ model: $('chatModel').value, messages: msgs, stream: true })
+  }).then(async (r) => {
+    if (r.status !== 200) { out.textContent = 'HTTP ' + r.status + ' — ' + (await r.text()); return null; }
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { done, value } = await rd.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const p = line.slice(6);
+        if (p === '[DONE]') { out.textContent += '\n— done —'; continue; }
+        try {
+          const j = JSON.parse(p);
+          if (j.error) { out.innerHTML += `<span class="err">${esc(p)}</span>`; continue; }
+          const d = j.choices?.[0]?.delta;
+          if (d?.content) out.textContent += d.content;
+          if (d?.tool_calls) out.innerHTML += `\n<span class="okc">[tool_call ${esc(d.tool_calls[0]?.function?.name ?? '')}]</span>`;
+        } catch {}
+      }
+    }
+    return null;
+  }).catch((e) => out.textContent = String(e))
+    .finally(() => { $('chatSend').disabled = false; refreshStats(); });
+};
+refreshAll();
+setInterval(() => { refreshHealth(); refreshStats(); }, 8000);
+</script>
+</body>
+</html>
