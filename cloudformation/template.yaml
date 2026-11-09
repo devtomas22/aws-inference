@@ -78,7 +78,7 @@ Resources:
     Properties:
       GroupDescription: aws-inference - egress only (all access via Cloudflare Tunnel + SSM)
       SecurityGroupEgress:
-        - { IpProtocol: -1, CidrIp: 0.0.0.0/0 }
+        - { IpProtocol: '-1', CidrIp: 0.0.0.0/0 }
 
   Instance:
     Type: AWS::EC2::Instance
