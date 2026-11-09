@@ -55,10 +55,12 @@ you ──HTTPS──> trycloudflare.com tunnel ──> cloudflared (EC2, egress
 Auth wall: any `/v1`, `/api`, dashboard route requires the key. The key never
 leaves the box except into SSM (SecureString) and the deploy console output.
 
-Model names: any Bedrock model/inference-profile id passes through
-(`anthropic.claude-haiku-4-5-20251001-v1:0`, `zai.glm-5.3`, …). Friendly aliases in
-`models.json` map `haiku`/`sonnet`/`glm`/`nova`/… Unrecognised OpenAI-ish names fall
-back to the default model. Default: `anthropic.claude-haiku-4-5-20251001-v1:0`.
+Model names: any Bedrock model/inference-profile id passes through. Friendly aliases in
+`models.json` (verified per account by a live probe on 2026-11-09): `haiku`, `sonnet`
+(claude-sonnet-4.5), `gpt-oss`, `gpt-oss-20b`, `nova`, `nova-pro`, `nova-micro`, plus
+aliases for opus/glm/kimi/deepseek that 403 until that account enables model access.
+Default: `us.anthropic.claude-haiku-4-5-20251001-v1:0`. Unrecognised OpenAI-ish names
+fall back to the default model.
 
 ## Plug-and-play
 

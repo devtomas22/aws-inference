@@ -2,29 +2,38 @@
   "default": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   "map": {
     "haiku": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "sonnet": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "sonnet": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "sonnet-4-5": "anthropic.claude-sonnet-4-5-20250929-v1:0",
     "opus": "us.anthropic.claude-opus-4-5-20251101-v1:0",
     "glm": "zai.glm-5.3",
     "glm-fast": "zai.glm-4.7-flash",
     "nova": "amazon.nova-lite-v1:0",
+    "nova-lite": "amazon.nova-lite-v1:0",
+    "nova-micro": "amazon.nova-micro-v1:0",
     "nova-pro": "amazon.nova-pro-v1:0",
     "kimi": "moonshotai.kimi-k2.5",
     "deepseek": "deepseek.v3.2",
-    "gpt-oss": "openai.gpt-oss-120b-1:0"
+    "gpt-oss": "openai.gpt-oss-120b-1:0",
+    "gpt-oss-120b": "openai.gpt-oss-120b-1:0",
+    "gpt-oss-20b": "openai.gpt-oss-20b-1:0"
   },
   "suggested": [
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "us.anthropic.claude-opus-4-5-20251101-v1:0",
-    "zai.glm-5.3",
-    "zai.glm-4.7-flash",
-    "amazon.nova-lite-v1:0",
-    "amazon.nova-pro-v1:0",
-    "amazon.nova-micro-v1:0",
+    "anthropic.claude-sonnet-4-5-20250929-v1:0",
     "openai.gpt-oss-120b-1:0",
-    "deepseek.v3.2",
-    "moonshotai.kimi-k2.5",
-    "mistral.mistral-large-3-675b-instruct",
-    "qwen.qwen3-coder-next"
+    "openai.gpt-oss-20b-1:0",
+    "amazon.nova-pro-v1:0",
+    "amazon.nova-lite-v1:0",
+    "amazon.nova-micro-v1:0"
+  ],
+  "_verified_live": "These were invoked OK through the gateway on 2026-11-09: haiku-4.5, sonnet-4.5 (us. + global profiles), gpt-oss-120b/20b, nova-pro/lite/micro. The gateway passes ANY Bedrock id through — the rest of the catalog (opus-5.x, sonnet-5, glm-5.3, kimi, gpt-5/6, deepseek) 403s until model access is enabled for the account; re-probe and edit here when access changes.",
+  "_needs_account_access": [
+    "us.anthropic.claude-opus-4-5-20251101-v1:0",
+    "global.anthropic.claude-opus-5",
+    "global.anthropic.claude-sonnet-5",
+    "global.zai.glm-5.3",
+    "global.openai.gpt-5.6-sol",
+    "global.moonshotai.kimi-k3"
   ]
 }
