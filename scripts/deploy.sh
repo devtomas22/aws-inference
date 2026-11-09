@@ -9,17 +9,29 @@ PROFILE="${PROFILE:-sandbox}"
 STACK="${STACK:-aws-inference}"
 REGION="${REGION:-$(aws configure get region --profile "$PROFILE" 2>/dev/null || true)}"
 REGION="${REGION:-us-east-1}"
-INSTANCE_TYPE="${INSTANCE_TYPE:-t3.small}"
+INSTANCE_TYPE="${INSTANCE_TYPE:-t3.micro}"
 REPO_URL="${REPO_URL:-https://github.com/devtomas22/aws-inference.git}"
 TUNNEL_TOKEN="${TUNNEL_TOKEN:-}"
 BASE="${BASE:-}"
 
 echo "== [1/4] cloudformation deploy  stack=$STACK  profile=$PROFILE  region=$REGION  type=$INSTANCE_TYPE =="
-aws --profile "$PROFILE" --region "$REGION" cloudformation deploy \
-  --template-file cloudformation/template.yaml \
-  --stack-name "$STACK" \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN"
+DEPLOY_OK=0
+for ATTEMPT in 1 2 3 4; do
+  if aws --profile "$PROFILE" --region "$REGION" cloudformation deploy \
+    --template-file cloudformation/template.yaml \
+    --stack-name "$STACK" \
+    --capabilities CAPABILITY_IAM \
+    --parameter-overrides InstanceType="$INSTANCE_TYPE" RepoUrl="$REPO_URL" TunnelToken="$TUNNEL_TOKEN"; then
+    DEPLOY_OK=1; break
+  fi
+  echo "  deploy attempt $ATTEMPT/4 failed — retrying in 15s (some backends reject fresh change sets intermittently)…"
+  # an intermittently rejected change set may have created a rollback-in-progress stack; wait for it to settle
+  aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" 2>/dev/null || \
+  aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-rollback-complete --stack-name "$STACK" 2>/dev/null || true
+  aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" 2>/dev/null || true
+  sleep 15
+done
+[ "$DEPLOY_OK" = 1 ] || { echo "create failed after retries — check: aws cloudformation describe-stack-events --stack-name $STACK | tail -20"; exit 1; }
 
 STACK_JSON=$(aws --profile "$PROFILE" --region "$REGION" cloudformation describe-stacks --stack-name "$STACK" \
   --query 'Stacks[0].{Outputs:Outputs,Status:StackStatus}' --output json)

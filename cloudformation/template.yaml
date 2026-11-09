@@ -8,8 +8,8 @@ Description: >
 Parameters:
   InstanceType:
     Type: String
-    Default: t3.small
-    Description: EC2 instance type (t3.small recommended; micro works but is tight)
+    Default: t3.micro
+    Description: EC2 instance type. t3.micro (1 vCPU/1GiB) is the default — free-tier eligible and fits the gateway, cloudflared and a hermes agent. t3.small/t3.medium for heavier use where allowed.
   KeyName:
     Type: String
     Default: ''

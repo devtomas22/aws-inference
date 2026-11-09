@@ -17,7 +17,9 @@ you ──HTTPS──> trycloudflare.com tunnel ──> cloudflared (EC2, egress
 
 ## What gets deployed (CloudFormation: `cloudformation/template.yaml`)
 
-- EC2 AL2023 instance + IAM role (bedrock invoke/list, SSM param publish, SSM access)
+- EC2 AL2023 instance (default `t3.micro` — fits free-tier/lab accounts where only
+  free-tier instance classes are allowed; pass `INSTANCE_TYPE=t3.small` if your
+  account permits it) + IAM role (bedrock invoke/list, SSM param publish, SSM access)
 - Security group with **no ingress rules at all** (egress only)
 - user-data → `ec2/bootstrap.sh`, which installs:
   - **Node 22** (official tarball) + gateway deps (`npm install`)
