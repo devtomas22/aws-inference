@@ -178,7 +178,7 @@ if [[ "$URL" == https://* ]]; then
   HERMES_URL=""
   NEW_LAUNCH=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-instances --instance-ids "$INSTANCE_ID" \
     --query 'Reservations[].Instances[0].LaunchTime' --output text 2>/dev/null || true)
-  if [ "$HERMES_DASH_SKIP" != 1 ] && { [ "$OLD_LAUNCH" != "$NEW_LAUNCH" ] || [ -n "$OLD_HURL" ]; }; then
+  if [ "${HERMES_DASH_SKIP:-0}" != 1 ] && { [ "$OLD_LAUNCH" != "$NEW_LAUNCH" ] || [ -n "$OLD_HURL" ]; }; then
     echo "  waiting for hermes dashboard tunnel (SSM $PREFIX/hermes-url)…"
     for i in $(seq 1 40); do
       HERMES_URL=$(aws --profile "$PROFILE" --region "$REGION" ssm get-parameter --name "$PREFIX/hermes-url" \
