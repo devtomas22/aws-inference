@@ -19,8 +19,9 @@ curl -fsS -m 10 -o /dev/null https://github.com || echo NET-FAIL-github
 curl -fsS -m 10 -o /dev/null https://nodejs.org || echo NET-FAIL-nodejs
 curl -fsS -m 10 -o /dev/null https://hermes-agent.nousresearch.com || echo NET-FAIL-hermes
 
-# --- base packages (git/tar preinstalled on AL2023; xz + awscli guard)
-dnf install -y xz tar git awscli || dnf install -y xz tar git
+# --- base packages (AL2023 ships git/tar; awscli not always on the AMI — install if absent)
+dnf install -y xz tar git || echo FAIL-DNF-BASE
+command -v aws >/dev/null 2>&1 || dnf install -y awscli || true
 for T in git aws curl tar; do command -v "$T" >/dev/null || echo FAIL-MISSING-$T; done
 command -v aws >/dev/null || { echo FAIL-NO-AWSCLI; exit 1; }
 
