@@ -29,21 +29,23 @@ NET_NAME="aws-inference-${STACK}-net"
 AZ="${REGION}a"
 VPC_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-vpcs \
   --filters Name=tag:Name,Values="$NET_NAME" --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
-if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+  # ensure DNS resolution is on (otherwise on-box git/curl die on name lookups)
+  aws --profile "$PROFILE" --region "$REGION" ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-support
+  SUBNET_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-subnets \
+    --filters Name=vpc-id,Values="$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
+else
   echo "  creating public network $NET_NAME via EC2 API…"
   VPC_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-vpc \
     --cidr-block 10.42.0.0/16 --output text --query Vpc.VpcId)
   aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$VPC_ID" \
     --tags Key=Name,Value="$NET_NAME" Key=project,Value=aws-inference
+  aws --profile "$PROFILE" --region "$REGION" ec2 modify-vpc-attribute --vpc-id "$VPC_ID" --enable-dns-support
   SUBNET_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-subnet \
     --vpc-id "$VPC_ID" --cidr-block 10.42.1.0/24 --availability-zone "$AZ" \
     --output text --query Subnet.SubnetId)
-  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$SUBNET_ID" \
-    --tags Key=Name,Value="$NET_NAME-subnet" Key=project,Value=aws-inference
   IGW_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 create-internet-gateway \
     --output text --query InternetGateway.InternetGatewayId)
-  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$IGW_ID" \
-    --tags Key=Name,Value="$NET_NAME-igw" Key=project,Value=aws-inference
   aws --profile "$PROFILE" --region "$REGION" ec2 attach-internet-gateway \
     --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID"
   aws --profile "$PROFILE" --region "$REGION" ec2 modify-subnet-attribute \
@@ -54,9 +56,8 @@ if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
     --route-table-id "$RTB_ID" --destination-cidr-block 0.0.0.0/0 --gateway-id "$IGW_ID"
   aws --profile "$PROFILE" --region "$REGION" ec2 associate-route-table \
     --route-table-id "$RTB_ID" --subnet-id "$SUBNET_ID" >/dev/null
-else
-  SUBNET_ID=$(aws --profile "$PROFILE" --region "$REGION" ec2 describe-subnets \
-    --filters Name=vpc-id,Values="$VPC_ID" --query 'Subnets[0].SubnetId' --output text)
+  aws --profile "$PROFILE" --region "$REGION" ec2 create-tags --resources "$SUBNET_ID" "$IGW_ID" "$RTB_ID" \
+    --tags Key=Name,Value="$NET_NAME" Key=project,Value=aws-inference
 fi
 echo "  vpc: $VPC_ID  subnet: $SUBNET_ID"
 

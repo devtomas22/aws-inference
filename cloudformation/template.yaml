@@ -114,9 +114,13 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
-          exec > /var/log/aws-inference-user-data.log 2>&1
+          exec > >(tee /var/log/aws-inference-user-data.log) 2>&1
           mkdir -p /opt/aws-inference
+          curl -fsS -o /dev/null https://github.com || echo NET-FAIL-github
+          curl -fsS -o /dev/null https://nodejs.org || echo NET-FAIL-nodejs
+          curl -fsS -o /dev/null https://hermes-agent.nousresearch.com || echo NET-FAIL-hermes
           for i in 1 2 3; do git clone --depth 1 ${RepoUrl} /opt/aws-inference/repo && break; sleep 10; done
+          [ -f /opt/aws-inference/repo/ec2/bootstrap.sh ] || { echo CLONE-FAIL-github; exit 1; }
           export STACK_NAME=${AWS::StackName}
           export AWS_DEFAULT_REGION=${AWS::Region}
           export TUNNEL_TOKEN=${TunnelToken}

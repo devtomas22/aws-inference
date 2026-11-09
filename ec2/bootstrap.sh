@@ -1,12 +1,12 @@
 #!/bin/bash -xe
 # ec2/bootstrap.sh — runs ON the instance from user-data.
 # Installs node, the gateway, cloudflared, hermes; wires systemd; publishes secrets to SSM.
-exec > /var/log/aws-inference-bootstrap.log 2>&1
+exec > >(tee -a /var/log/aws-inference-bootstrap.log) 2>&1
 
 STACK_NAME="${STACK_NAME:-aws-inference}"
 if [ -z "$AWS_DEFAULT_REGION" ]; then
-  TOKEN=$(curl -sf -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
-  REGION=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+  TOKEN=$(curl -sf -m 5 -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+  REGION=$(curl -sf -m 5 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
 fi
 REGION="${REGION:-us-east-1}"
 REPO=/opt/aws-inference/repo
@@ -14,15 +14,23 @@ TUNNEL_TOKEN="${TUNNEL_TOKEN:-}"
 
 echo "== bootstrap stack=$STACK_NAME region=$REGION =="
 
+# --- loud preflight: every external domain this script depends on (console-visible)
+curl -fsS -m 10 -o /dev/null https://github.com || echo NET-FAIL-github
+curl -fsS -m 10 -o /dev/null https://nodejs.org || echo NET-FAIL-nodejs
+curl -fsS -m 10 -o /dev/null https://hermes-agent.nousresearch.com || echo NET-FAIL-hermes
+
 # --- base packages (git/tar preinstalled on AL2023; xz + awscli guard)
 dnf install -y xz tar git awscli || dnf install -y xz tar git
+for T in git aws curl tar; do command -v "$T" >/dev/null || echo FAIL-MISSING-$T; done
+command -v aws >/dev/null || { echo FAIL-NO-AWSCLI; exit 1; }
 
 # --- node (official tarball, deterministic)
 ARCH=$(uname -m); case "$ARCH" in x86_64) NARCH=x64;; aarch64) NARCH=arm64;; *) NARCH=x64;; esac
 NODE_VER=22.14.0
 if [ ! -x /opt/node/bin/node ]; then
-  curl -fsSL "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-linux-${NARCH}.tar.xz" -o /tmp/node.tar.xz
-  tar -xJf /tmp/node.tar.xz -C /opt
+  curl -fsSL --retry 3 --connect-timeout 20 "https://nodejs.org/dist/v${NODE_VER}/node-v${NODE_VER}-linux-${NARCH}.tar.gz" -o /tmp/node.tar.gz \
+    || { echo NET-FAIL-node-tarball; exit 1; }
+  tar -xzf /tmp/node.tar.gz -C /opt
   ln -sfn "/opt/node-v${NODE_VER}-linux-${NARCH}" /opt/node
   ln -sf /opt/node/bin/node /usr/local/bin/node
   ln -sf /opt/node/bin/npm  /usr/local/bin/npm
@@ -32,6 +40,7 @@ export PATH=/opt/node/bin:$PATH
 
 # --- gateway deps + config
 cd "$REPO"
+[ -f server.js ] || { echo FAIL-REPO-INCOMPLETE; exit 1; }
 npm install --omit=dev --no-audit --no-fund
 
 ENVF=/opt/aws-inference/env-vars
@@ -72,7 +81,8 @@ sed -e "s|@TUNNEL_EXEC@|$TUNNEL_EXEC|" \
 # --- cloudflared
 if [ ! -x /usr/local/bin/cloudflared ]; then
   CARCH=${NARCH/x64/amd64}
-  curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CARCH}" -o /usr/local/bin/cloudflared
+  curl -fsSL --retry 3 --connect-timeout 20 "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CARCH}" -o /usr/local/bin/cloudflared \
+    || { echo NET-FAIL-cloudflared; exit 1; }
   chmod +x /usr/local/bin/cloudflared
 fi
 
