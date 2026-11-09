@@ -100,10 +100,18 @@ for ATTEMPT in 1 2 3 4 5 6; do
     DEPLOY_OK=1; break
   fi
   echo "  deploy attempt $ATTEMPT/6 failed — waiting 30s before retry…"
-  # a rejected change set can leave a rollback-in-progress stack; wait for it to settle
-  aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" 2>/dev/null || \
-  aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-rollback-complete --stack-name "$STACK" 2>/dev/null || true
-  aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" 2>/dev/null || true
+  # a rejected change set can leave a rollback-in-progress / ROLLBACK_COMPLETE stack;
+  # a ROLLBACK_COMPLETE stack blocks ALL further change sets -> delete it and wait out
+  ST=$(aws --profile "$PROFILE" --region "$REGION" cloudformation describe-stacks --stack-name "$STACK" \
+       --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)
+  if [ "$ST" = "ROLLBACK_COMPLETE" ] || [[ "$ST" == *_FAILED ]]; then
+    echo "  stack in $ST — deleting before retry…"
+    aws --profile "$PROFILE" --region "$REGION" cloudformation delete-stack --stack-name "$STACK" 2>/dev/null || true
+    aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-delete-complete --stack-name "$STACK" 2>/dev/null || true
+  else
+    aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-create-complete --stack-name "$STACK" 2>/dev/null || \
+    aws --profile "$PROFILE" --region "$REGION" cloudformation wait stack-rollback-complete --stack-name "$STACK" 2>/dev/null || true
+  fi
   sleep 30
 done
 [ "$DEPLOY_OK" = 1 ] || {
