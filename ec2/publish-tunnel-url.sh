@@ -9,8 +9,8 @@ REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 STACK_NAME="${STACK_NAME:-aws-inference}"
 TUNNEL_TOKEN="${TUNNEL_TOKEN:-}"
 
-grab() { # grab <unit> — latest trycloudflare URL from the unit's journal
-  journalctl -u "$1" --no-pager -o cat | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n1
+grab() { # grab <unit> — latest trycloudflare URL from THIS boot's journal only
+  journalctl --boot -u "$1" --no-pager -o cat | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n1
 }
 
 if [ -n "$TUNNEL_TOKEN" ]; then

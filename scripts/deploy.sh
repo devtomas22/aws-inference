@@ -24,6 +24,21 @@ BASE="${BASE:-}"
 DEPLOY_TAG=$(git -C "$(pwd)" rev-parse --short HEAD 2>/dev/null || echo manual)
 echo "  deploy-tag: $DEPLOY_TAG"
 
+# This backend updates EC2 instances IN PLACE on some property changes — changed
+# user-data would never land. So when the shipped code (repo SHA) differs from what
+# the current stack was deployed with, recreate the whole stack instead of updating.
+OLD_TAG=""
+ST_CUR=$(aws --profile "$PROFILE" --region "$REGION" cloudformation describe-stacks --stack-name "$STACK" \
+  --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo none)
+if [[ "$ST_CUR" == *_COMPLETE ]]; then
+  OLD_TAG=$(aws --profile "$PROFILE" --region "$REGION" cloudformation describe-stacks --stack-name "$STACK" \
+    --query "Stacks[0].Parameters[?ParameterKey=='DeployTag'].ParameterValue" --output text 2>/dev/null || echo none)
+fi
+if [ -n "$OLD_TAG" ] && [ "$OLD_TAG" != "None" ] && [ "$OLD_TAG" != "$DEPLOY_TAG" ]; then
+  echo "  shipped code changed ($OLD_TAG -> $DEPLOY_TAG) — recreating stack (in-place updates don't land user-data here)"
+  PROFILE="$PROFILE" STACK="$STACK" REGION="$REGION" bash scripts/teardown.sh
+fi
+
 echo "== [1/4] cloudformation deploy  stack=$STACK  profile=$PROFILE  region=$REGION  type=$INSTANCE_TYPE =="
 
 # Public network OUTSIDE CloudFormation: this account has NO default VPC and the only

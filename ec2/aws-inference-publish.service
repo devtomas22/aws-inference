@@ -1,12 +1,14 @@
 [Unit]
-Description=Publish aws-inference tunnel URL to SSM Parameter Store
-After=aws-inference-tunnel.service
-Wants=aws-inference-tunnel.service
+Description=Publish aws-inference tunnel URLs to SSM Parameter Store
+After=aws-inference-tunnel.service aws-inference-tunnel-hermes.service
+Wants=aws-inference-tunnel.service aws-inference-tunnel-hermes.service
 
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /opt/aws-inference/repo/ec2/publish-tunnel-url.sh
 EnvironmentFile=/opt/aws-inference/env-vars
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
