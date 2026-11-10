@@ -1,8 +1,20 @@
 {
-  "default": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "default": "auto",
+  "preferred": [
+    "global.anthropic.claude-sonnet-5-5",
+    "global.anthropic.claude-sonnet-5",
+    "us.anthropic.claude-sonnet-5-5",
+    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "global.anthropic.claude-haiku-5-5",
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  ],
   "map": {
-    "haiku": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "sonnet": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "auto": "auto:global.anthropic.claude-sonnet-5-5,global.anthropic.claude-sonnet-5,us.anthropic.claude-sonnet-5-5,global.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-sonnet-4-5-20250929-v1:0,global.anthropic.claude-haiku-5-5,us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "sonnet-5-auto": "auto:global.anthropic.claude-sonnet-5-5,global.anthropic.claude-sonnet-5,global.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "newest": "auto:global.anthropic.claude-sonnet-5-5,global.anthropic.claude-sonnet-5,global.anthropic.claude-haiku-5-5,us.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "haiku": "auto:global.anthropic.claude-haiku-5-5,us.anthropic.claude-haiku-5-5,us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "sonnet": "auto:global.anthropic.claude-sonnet-5-5,global.anthropic.claude-sonnet-5,global.anthropic.claude-sonnet-4-5-20250929-v1:0,us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "sonnet-4-5": "anthropic.claude-sonnet-4-5-20250929-v1:0",
     "opus": "us.anthropic.claude-opus-4-5-20251101-v1:0",
     "glm": "zai.glm-5.3",
@@ -27,11 +39,14 @@
     "amazon.nova-lite-v1:0",
     "amazon.nova-micro-v1:0"
   ],
-  "_verified_live": "These were invoked OK through the gateway on 2026-11-09: haiku-4.5, sonnet-4.5 (us. + global profiles), gpt-oss-120b/20b, nova-pro/lite/micro. The gateway passes ANY Bedrock id through — the rest of the catalog (opus-5.x, sonnet-5, glm-5.3, kimi, gpt-5/6, deepseek) 403s until model access is enabled for the account; re-probe and edit here when access changes.",
+  "_auto_mode": "Aliases 'auto'/'newest'/'sonnet'/'haiku' walk their preference list: each candidate is probed with a 1-token Bedrock call at first use, disallowed ids (AccessDenied/Validation/NotFound) are skipped and remembered, the first working id becomes the sticky default for the process. So 'sonnet-5 and newest sonnet + haiku' is used whenever the account enables it, falling back cleanly to sonnet-4.5/haiku-4.5 when it does not.",
+  "_verified_live": "These were invoked OK through the gateway on 2026-11-09: haiku-4.5, sonnet-4.5 (us. + global profiles), gpt-oss-120b/20b, nova-pro/lite/micro. The gateway passes ANY Bedrock id through; the rest of the catalog (opus-5.x, sonnet-5, glm-5.3, kimi, gpt-5/6, deepseek) 403s until model access is enabled per account.",
   "_needs_account_access": [
     "us.anthropic.claude-opus-4-5-20251101-v1:0",
     "global.anthropic.claude-opus-5",
     "global.anthropic.claude-sonnet-5",
+    "global.anthropic.claude-sonnet-5-5",
+    "global.anthropic.claude-haiku-5-5",
     "global.zai.glm-5.3",
     "global.openai.gpt-5.6-sol",
     "global.moonshotai.kimi-k3"

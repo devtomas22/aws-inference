@@ -189,11 +189,57 @@ function suggestDefault() {
   return (modelCache.ids || [])[0] || MODELS_META.default;
 }
 
+// Auto model selection: alias values 'auto' / 'auto:<csv of bedrock ids>' walk a
+// preference list. Each candidate is probed with a 1-token Converse call at first
+// use; blocked ids (AccessDenied / Validation / NotFound — i.e. not enabled for the
+// account) are skipped and remembered process-wide, and the first reachable id
+// becomes the sticky default. Lets 'sonnet-5 / newest sonnet / newest haiku' light
+// up the moment an account enables them, falling back to sonnet-4.5 / haiku-4.5.
+const AUTO_BAD = new Set();
+const AUTO_OK = new Map(); // preference-list-key -> resolved bedrock id
+const AUTO_BLOCKED = new Set(['AccessDeniedException', 'ResourceNotFoundException', 'NotFoundException', 'ValidationException', 'ModelNotReadyException']);
+async function autoModel(list) {
+  const key = list.join('|');
+  if (AUTO_OK.has(key)) return AUTO_OK.get(key);
+  let lastBad = null;
+  for (const cand of list) {
+    if (!cand || AUTO_BAD.has(cand)) continue;
+    try {
+      await RUNTIME.send(new ConverseCommand({
+        modelId: cand,
+        messages: [{ role: 'user', content: [{ text: 'ping' }] }],
+        inferenceConfig: { maxTokens: 1 }
+      }));
+      AUTO_OK.set(key, cand);
+      console.log(`[auto] preferred model resolved: ${cand}`);
+      return cand;
+    } catch (e) {
+      console.warn(`[auto] candidate blocked: ${cand} (${e.name || 'Error'})`);
+      if (AUTO_BLOCKED.has(e.name)) { AUTO_BAD.add(cand); lastBad = `${cand}: ${e.name}`; continue; }
+      throw e; // unexpected (network, throttling…) — surface to the caller
+    }
+  }
+  throw new Error(`no reachable model in preference list of ${list.length}; last blocked: ${lastBad || '-'}`);
+}
+
 function resolveModel(requested) {
   const map = MODELS_META.map || {};
-  if (requested && map[requested]) return { id: map[requested], echoed: requested };
-  if (!requested || requested === 'default') return { id: CONFIG.defaultModel || suggestDefault(), echoed: requested };
+  if (requested && map[requested]) {
+    const spec = map[requested];
+    if (spec === 'auto') return { auto: MODELS_META.preferred || [], echoed: requested };
+    if (spec.startsWith('auto:')) return { auto: spec.slice(5).split(',').map((s) => s.trim()), echoed: requested };
+    return { id: spec, echoed: requested };
+  }
+  const req = requested || 'default';
+  if (req === 'default' && MODELS_META.default === 'auto') return { auto: MODELS_META.preferred || [], echoed: requested };
+  if (req === 'auto') return { auto: MODELS_META.preferred || [CONFIG.defaultModel].filter(Boolean), echoed: requested };
+  if (!requested) return { id: CONFIG.defaultModel || suggestDefault(), echoed: requested };
   return { id: requested, echoed: requested }; // Bedrock ids (incl. inference profiles) pass straight through
+}
+
+function defaultModelLabel() {
+  const sticky = AUTO_OK.get((MODELS_META.preferred || []).join('|'));
+  return sticky || (MODELS_META.preferred || [])[0] || CONFIG.defaultModel || 'auto';
 }
 
 // ---------------------------------------------------------------- app
@@ -221,7 +267,7 @@ app.get('/api/stats', requireAuth, (req, res) => {
   res.json({
     version: VERSION,
     uptime_s: Math.round((Date.now() - START) / 1000),
-    default_model: CONFIG.defaultModel,
+    default_model: defaultModelLabel(),
     region: CONFIG.region,
     tunnel_url: tunnelUrl(),
     hermes_url: hermesUrl(),
@@ -281,9 +327,22 @@ app.post('/v1/chat/completions', requireAuth, async (req, res) => {
   if (!Array.isArray(msgs) || !msgs.length) {
     return res.status(400).json({ error: { message: 'messages array required', type: 'invalid_request_error' } });
   }
-  const { id: modelId, echoed } = resolveModel(body.model);
+  const resolved = resolveModel(body.model);
   const stream = !!body.stream;
   const started = Date.now();
+  let modelId;
+  if (resolved.auto) {
+    if (!resolved.auto.length) {
+      return res.status(503).json({ error: { message: 'no preference list configured (models.json "preferred")', type: 'api_error' } });
+    }
+    try { modelId = await autoModel(resolved.auto); }
+    catch (e) {
+      return res.status(503).json({ error: { message: `auto model selection failed: ${e.message}`, type: 'api_error', code: 'auto_unavailable' } });
+    }
+  } else {
+    modelId = resolved.id;
+  }
+  const echoed = resolved.echoed ?? modelId;
   let params;
   try { params = toConverseParams(body, modelId, msgs); }
   catch (e) { return sendError(res, e, 'converting request'); }

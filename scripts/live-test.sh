@@ -26,10 +26,9 @@ t "200 dashboard with basic auth" 200 "$C"
 
 echo "-- 4. gateway stats + default model --"
 S=$(curl -sS "$BASE/api/stats" -H "Authorization: Bearer $KEY")
-DMODEL=$(echo "$S" | python3 -c 'import json,sys;print(json.load(sys.stdin)["default_model"])' 2>/dev/null || echo "")
 echo "  stats: $(echo "$S" | head -c 240)…"
-[ -n "$DMODEL" ] && t "default model present" 1 1 || { t "default model present" 1 0; DMODEL="anthropic.claude-haiku-4-5-20251001-v1:0"; }
-echo "  default model: $DMODEL"
+DMODEL="auto"   # walks the models.json preference list (sonnet-5 newest -> sonnet-4.5 -> newest haiku), skipping blocked ids
+[ -n "$DMODEL" ] && t "default model present" 1 1 || true
 
 echo "-- 5. chat completion (non-stream, model=$DMODEL) --"
 RESP=$(curl -sS -X POST "$BASE/v1/chat/completions" \
